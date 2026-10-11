@@ -5,61 +5,61 @@
         {
           "name": "x32/d3d8.dll",
           "path": "dxvk/x32/d3d8.dll",
-          "sha256": "866dfdb5be0fbaa35606d2132b0c0aca9422991cfa4c07fd1a17257dce838f8d",
+          "sha256": "c9612be6aac99390156cdcd3b22054fba62cf68bfc948d753cc39282d37f67ab",
           "size": 1658894
         },
         {
           "name": "x32/d3d9.dll",
           "path": "dxvk/x32/d3d9.dll",
-          "sha256": "a625ad5509f3f732da54860df4f5b74322cc15827162ebf68b93e8ad15ed1013",
+          "sha256": "fbd0e7d7aae39d5d623757ead228930c4be78cb3b16db6f352796577831ce36e",
           "size": 7598094
         },
         {
           "name": "x32/d3d10core.dll",
           "path": "dxvk/x32/d3d10core.dll",
-          "sha256": "b54c9fc130f3d1cea60fb815e92fcfb7c504586776240df631181a6f2f49c2ac",
+          "sha256": "cd6052b1f6a02ab94fea5bfa3519e556fb353f585da4b64e3c810ef4cc37c808",
           "size": 192526
         },
         {
           "name": "x32/d3d11.dll",
           "path": "dxvk/x32/d3d11.dll",
-          "sha256": "7aff60db7e584142aed961812b264811bb02e2f1f62c67ea398c8b3283eb26aa",
+          "sha256": "9bf51b5ab913e1bd84513b2b1608586bc0a651788df9e664b8135840b8c8c54d",
           "size": 7942158
         },
         {
           "name": "x32/dxgi.dll",
           "path": "dxvk/x32/dxgi.dll",
-          "sha256": "69ca4fe95f0126f11c4cc1b5586bb436bbb15bfa582c6be125cd05348b4d1adf",
+          "sha256": "d3772dc86267fe94eee7afc30c993f44297fd43b50210f1691f3d03ebf4d4402",
           "size": 5738510
         },
         {
           "name": "x64/d3d8.dll",
           "path": "dxvk/x64/d3d8.dll",
-          "sha256": "edbb2c453f03b0b3007c9229c7e90534d5b0cd4feda952490c83d1672884fb84",
+          "sha256": "cd870a8f5cdbfef33e7ccf7884d6f1c442e2c8ec22d6adea60fea3dbe83c32e2",
           "size": 1499136
         },
         {
           "name": "x64/d3d9.dll",
           "path": "dxvk/x64/d3d9.dll",
-          "sha256": "5e5ba716181f057d089d81deb0802a3df9e903396085bf261d7930adc09fd695",
-          "size": 6930432
+          "sha256": "4f80af96991073bb3dc25f3b93ec2c07ba25fcabb8a6e30ffd5eaae38c8465c7",
+          "size": 6934528
         },
         {
           "name": "x64/d3d10core.dll",
           "path": "dxvk/x64/d3d10core.dll",
-          "sha256": "8c5934ec6a3e5b91c417669386efb97b762121e93708918cc3b680933b8134a4",
+          "sha256": "4950e952ca291b13c0645322f1831414e77df87183ed2f81d5dde02c1fd43ff9",
           "size": 978944
         },
         {
           "name": "x64/d3d11.dll",
           "path": "dxvk/x64/d3d11.dll",
-          "sha256": "efa88c5091afd468c72d26e196fd4980a89d514998cca2f68aeb2fc8802664c1",
+          "sha256": "3497d5f7dc78fa7affdba6777d3ab4aac7ec744d7e2c795fbf07dbff54058e6c",
           "size": 7143424
         },
         {
           "name": "x64/dxgi.dll",
           "path": "dxvk/x64/dxgi.dll",
-          "sha256": "6efba10d85cca82846f9417e545f565506718d582695608a57af56ae178ea887",
+          "sha256": "d6e0ca242dba6cb8606106a7fcb65268225520f03c68e36a365f44d65f863e74",
           "size": 5230592
         },
         {
@@ -92,9 +92,9 @@
         "x64/d3d9.dll.a",
         "x64/dxgi.dll.a"
       ],
-      "sha256": "78fd37c5d2a5a035e671fbdb2157630083acb0657491fb185a11fd3c00d90801",
-      "size": 24061615,
-      "url": "https://github.com/wallentx/DroidDeck/releases/download/v0.3.2-progress.20261010.4/dxvk-abe5861.zip"
+      "sha256": "d08dd962ced3482883ad9e9eb4903a4d27a3756b4f989a97ecdfcccb53fbee66",
+      "size": 24063241,
+      "url": "https://github.com/wallentx/DroidDeck/releases/download/v0.3.2-progress.20261011.3/dxvk-aee0ebd.zip"
     },
     {
       "files": [

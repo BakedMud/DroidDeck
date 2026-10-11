@@ -54,6 +54,8 @@ uncapped performance, long-duration stability, or a fix for the earlier
 was not enabled. Both temporary configurations were restored byte for byte;
 the final managed choice is Standard and the new test fixture is inactive.
 
-After review, shipping the fixed DLLs requires a new immutable managed-pack
-release and matching checksums; this source change does not overwrite an older
-downloaded pack or turn on an experimental profile automatically.
+The managed-pack manifest pins the corrected DXVK archive and each installed
+DLL's size and checksum. Existing Experimental selections keep their old pack
+after an APK upgrade: choose **Update Experimental** under **Steam settings >
+Display > Drivers > Steam graphics**, then restart the game. Installing the APK
+does not replace a previously selected pack or enable Experimental automatically.

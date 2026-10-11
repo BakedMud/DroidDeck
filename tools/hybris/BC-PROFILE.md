@@ -26,6 +26,11 @@ restores the effect of the user's existing game settings. It does not delete
 or rewrite manually configured environment variables. Already running games
 keep their current configuration; changes apply on a subsequent game launch.
 
+When an APK offers a newer graphics pack, existing Experimental selections keep
+their previously selected revision until **Update Experimental** is chosen in
+the same Steam graphics dialog. Updating the APK alone does not update that
+selected pack. After updating the pack, restart the game to use its new DLLs.
+
 The app saves the selected immutable pack revision independently from raw
 game-environment settings. A failed download or installation cannot activate
 a partial profile. Missing or corrupt selected files cause an explicit repair
