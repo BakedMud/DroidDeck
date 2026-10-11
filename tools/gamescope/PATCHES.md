@@ -87,12 +87,23 @@ The build tests the retry guard and memory-type selection. Steam still needs an
 end-to-end device test after installing the new bundle.
 
 `0123-powervr-rgba-copy-surface.patch` requires an RGBA SDR surface for PowerVR's
-copy-based nested presentation. Gamescope's SDR shaders declare `rgba8`; a BGRA
-storage view reverses red and blue on the stock driver, and copying that image to
-a BGRA swapchain preserves the error. A native store-then-sample probe reproduced
-128/64/192 becoming 192/64/128 with BGRA, while RGBA retained 128/64/192. A live
-X11 checkerboard reproduced the same channel reversal. Other vendors, direct
-composition and HDR retain their existing format selection. This fixes channel
+copy-based nested presentation. Gamescope's SDR shaders declare `rgba8`, which
+requires an `R8G8B8A8_UNORM` storage view under Vulkan's
+[shader/image format compatibility rules](https://docs.vulkan.org/spec/latest/appendices/spirvenv.html#spirvenv-image-formats).
+Binding a BGRA storage view is a shader/view mismatch, not a demonstrated
+PowerVR-specific format-support defect. A same-format copy to a BGRA swapchain
+does not correct the mismatch. On the tested PowerVR device, a native
+store-then-sample probe reproduced 128/64/192 becoming 192/64/128 with BGRA,
+while RGBA retained 128/64/192; a live X11 checkerboard reproduced the reversal.
+
+The small selection helper keeps the workaround limited to that reproduced SDR
+copy path and requires an advertised `R8G8B8A8_UNORM` surface with
+`SRGB_NONLINEAR` color space. It fails explicitly if none is available. Other
+vendors, direct composition and HDR retain their existing format selection;
+game-facing BGRA requests are unchanged. The build's policy tests cover format
+ordering, RGBA-only and BGRA-only surfaces, incompatible formats/color spaces,
+empty lists, and those unchanged paths. Broadening the workaround needs a
+supported BGRA-only path and validation on other drivers. This fixes channel
 order; it does not address Steam's separate corrupted DRI3 window contents.
 
 `0124-sdl-preserve-explicit-refresh.patch` keeps an explicit nested refresh (`-r`) when SDL reports

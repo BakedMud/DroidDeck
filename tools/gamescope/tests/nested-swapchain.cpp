@@ -1,4 +1,5 @@
 #include "nested_swapchain.hpp"
+#include "nested_surface_format.hpp"
 #include "dmabuf_import.hpp"
 #include "sdl_refresh.hpp"
 #include <cassert>
@@ -61,6 +62,64 @@ int main()
     assert(config.extent.width == 16 && config.extent.height == 4096);
     caps.maxImageCount = 1;
     assert(!gamescope::ChooseNestedSwapchainConfig(caps, false, 1280, 720, config));
+
+    using gamescope::ChooseNestedSDRCopySurfaceFormat;
+    const VkSurfaceFormatKHR rgba = {
+        VK_FORMAT_R8G8B8A8_UNORM, VK_COLOR_SPACE_SRGB_NONLINEAR_KHR};
+    const VkSurfaceFormatKHR bgra = {
+        VK_FORMAT_B8G8R8A8_UNORM, VK_COLOR_SPACE_SRGB_NONLINEAR_KHR};
+    uint32_t surfaceFormat = UINT32_MAX;
+
+    // PowerVR SDR copy output needs the RGBA view matching the rgba8 shader.
+    const VkSurfaceFormatKHR bgraFirst[] = {bgra, rgba, rgba};
+    assert(ChooseNestedSDRCopySurfaceFormat(0x1010, true, false,
+                                           bgraFirst, 3, surfaceFormat));
+    assert(surfaceFormat == 1);
+    const VkSurfaceFormatKHR rgbaFirst[] = {rgba, bgra};
+    assert(ChooseNestedSDRCopySurfaceFormat(0x1010, true, false,
+                                           rgbaFirst, 2, surfaceFormat));
+    assert(surfaceFormat == 0);
+    assert(ChooseNestedSDRCopySurfaceFormat(0x1010, true, false,
+                                           &rgba, 1, surfaceFormat));
+    assert(surfaceFormat == 0);
+
+    // Reusing a successful index must not hide a missing compatible format.
+    assert(!ChooseNestedSDRCopySurfaceFormat(0x1010, true, false,
+                                            &bgra, 1, surfaceFormat));
+    assert(surfaceFormat == 1);
+    const VkSurfaceFormatKHR wrongColorSpace = {
+        VK_FORMAT_R8G8B8A8_UNORM, VK_COLOR_SPACE_DISPLAY_P3_NONLINEAR_EXT};
+    assert(!ChooseNestedSDRCopySurfaceFormat(0x1010, true, false,
+                                            &wrongColorSpace, 1, surfaceFormat));
+    assert(surfaceFormat == 1);
+    const VkSurfaceFormatKHR srgbFormat = {
+        VK_FORMAT_R8G8B8A8_SRGB, VK_COLOR_SPACE_SRGB_NONLINEAR_KHR};
+    assert(!ChooseNestedSDRCopySurfaceFormat(0x1010, true, false,
+                                            &srgbFormat, 1, surfaceFormat));
+    assert(surfaceFormat == 1);
+    const VkSurfaceFormatKHR compatibleLast[] = {wrongColorSpace, srgbFormat, rgba};
+    assert(ChooseNestedSDRCopySurfaceFormat(0x1010, true, false,
+                                           compatibleLast, 3, surfaceFormat));
+    assert(surfaceFormat == 2);
+    assert(!ChooseNestedSDRCopySurfaceFormat(0x1010, true, false,
+                                            nullptr, 0, surfaceFormat));
+    assert(surfaceFormat == 0);
+
+    // The existing selector still owns HDR, direct output, and other vendors.
+    // Each call clears a stale index even when BGRA is the only advertised format.
+    surfaceFormat = 0;
+    assert(ChooseNestedSDRCopySurfaceFormat(0x1010, true, true,
+                                           &bgra, 1, surfaceFormat));
+    assert(surfaceFormat == 1);
+    surfaceFormat = 0;
+    assert(ChooseNestedSDRCopySurfaceFormat(0x1010, false, false,
+                                           &bgra, 1, surfaceFormat));
+    assert(surfaceFormat == 1);
+    surfaceFormat = 0;
+    assert(ChooseNestedSDRCopySurfaceFormat(0x5143, true, false,
+                                           &bgra, 1, surfaceFormat));
+    assert(surfaceFormat == 1);
+
     // Retry only the device/format/layout/flag combination reproduced on PowerVR.
     using gamescope::RetryPowerVRLinearQuery;
     assert(RetryPowerVRLinearQuery(0x1010, VK_FORMAT_B8G8R8A8_UNORM, 0, 1,
