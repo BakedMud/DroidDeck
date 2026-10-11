@@ -1,0 +1,6 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="game_env_experimental_overrides">PowerVR Experimental manages its graphics variables at game launch. Grayed values are saved for Standard; other variables still apply.</string>
+    <string name="game_env_experimental_managed">Managed by Experimental</string>
+    <string name="game_env_experimental_reset">Reset editable variables</string>
+</resources>

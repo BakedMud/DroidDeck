@@ -2,6 +2,7 @@ package com.droiddeck.launcher.gpu;
 
 import android.content.Context;
 import android.util.Log;
+import com.droiddeck.launcher.R;
 
 import java.util.ArrayList;
 import java.util.List;
@@ -16,7 +17,8 @@ import java.util.List;
  * screen ({@link TurnipDriver}), which every session ends in - and NOT interchangeable with it:
  * these are glibc processes, that one is bionic.
  *
- * <p>"" (the default) means the driver the runtime was built with, at
+ * <p>"" (the default) selects the phone's PowerVR driver through the APK-bundled libhybris
+ * bridge on PowerVR devices. Otherwise it means the driver the runtime was built with, at
  * {@code usr/lib/libvulkan_freedreno.so} inside it - nothing is set and nothing is touched.
  * Otherwise the value is an imported driver's id ({@link LinuxVulkanDriverManager}), and the
  * session is handed that driver's ICD manifest in {@code BL_VK_DRIVER}: the session script points
@@ -51,7 +53,7 @@ public final class LinuxVulkanDriver {
      * back to the runtime's own driver for it.
      */
     public static String optionLabel(Context context, String value) {
-        if (SystemVulkanDriver.usesDefault(value)) return "System PowerVR (libhybris, experimental)";
+        if (SystemVulkanDriver.usesDefault(value)) return context.getString(R.string.gpu_runtime_powervr);
         if (value == null || value.isEmpty()) return "Runtime default (built into the runtime)";
         LinuxVulkanDriverManager m = new LinuxVulkanDriverManager(context);
         if (!m.isInstalled(value)) return value + " (imported, missing - uses the runtime default)";

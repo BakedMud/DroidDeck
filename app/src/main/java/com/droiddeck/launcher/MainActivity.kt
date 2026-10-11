@@ -48,6 +48,7 @@ import com.droiddeck.launcher.session.SteamRepair
 import com.droiddeck.launcher.session.PowerVrGraphicsProfile
 import com.droiddeck.launcher.ui.ProtonPage
 import com.droiddeck.launcher.core.CpuCores
+import com.droiddeck.launcher.core.ExperimentalGraphicsState
 import com.droiddeck.launcher.core.PhantomProcessLimit
 import com.droiddeck.launcher.core.PhantomProcessStatus
 import com.droiddeck.launcher.core.WirelessAdbFix
@@ -168,6 +169,7 @@ class MainActivity : ComponentActivity() {
     private var showPhantomGate by mutableStateOf(false)
     private var powerVrGraphicsDialog by mutableStateOf<PowerVrGraphicsUiState?>(null)
     private var powerVrGraphicsStatus by mutableStateOf<String?>(null)
+    private var experimentalGraphics by mutableStateOf(ExperimentalGraphicsState())
     private val powerVrLaunch = PowerVrLaunchCoordinator<Intent>()
     @Volatile private var powerVrStatusGeneration = 0
     private var directAudio by mutableStateOf(false)
@@ -1156,6 +1158,7 @@ class MainActivity : ComponentActivity() {
         showComponents = true
         components.refreshComponents(snapshotFirst = true)
         drivers.refreshDrivers()
+        refreshPowerVrGraphicsStatus()
     }
 
     private fun importComponent(uri: Uri) {
@@ -1182,22 +1185,33 @@ class MainActivity : ComponentActivity() {
             onProton = { components.chooseProton(it) },
             onComp = { components.compComp = it },
             onSwap = { file -> components.compProton?.let { pid -> components.componentAction(getString(R.string.comp_busy_swapping)) { ComponentsManager.swap(this, pid, file) } } },
-            onRestore = { version -> components.compProton?.let { pid -> components.componentAction(getString(R.string.comp_busy_restoring)) { ComponentsManager.restore(this, pid, components.compComp, version) } } },
-            onCancelQueued = { components.compProton?.let { pid -> components.componentAction(getString(R.string.comp_busy_cancelling)) { ComponentsManager.cancelQueued(this, pid, components.compComp); getString(R.string.comp_swap_cancelled) } } },
+            onRestore = { version ->
+                val component = components.compComp
+                components.compProton?.let { pid -> components.componentAction(getString(R.string.comp_busy_restoring)) { ComponentsManager.restore(this, pid, component, version) } }
+            },
+            onCancelQueued = {
+                val component = components.compComp
+                components.compProton?.let { pid -> components.componentAction(getString(R.string.comp_busy_cancelling)) { ComponentsManager.cancelQueued(this, pid, component); getString(R.string.comp_swap_cancelled) } }
+            },
             onDeletePackage = { file -> components.componentAction(getString(R.string.comp_busy_deleting)) { ComponentsManager.deletePackage(this, file) } },
-            onDeleteOriginal = { version -> components.compProton?.let { pid -> components.componentAction(getString(R.string.comp_busy_deleting)) { ComponentsManager.deleteOriginal(this, pid, components.compComp, version) } } },
+            onDeleteOriginal = { version ->
+                val component = components.compComp
+                components.compProton?.let { pid -> components.componentAction(getString(R.string.comp_busy_deleting)) { ComponentsManager.deleteOriginal(this, pid, component, version) } }
+            },
             onDownload = { components.downloadComponent(it) },
             onRefresh = { components.refreshComponentCatalog() },
             onImport = { pickComponent.launch(InAppFilePicker.buildIntent(this, WCP_EXT, getString(R.string.comp_pick_wcp))) },
             onBack = { showComponents = false },
-            gpu = drivers.state(),
+            experimentalGraphics = experimentalGraphics,
+            onGraphicsSettings = { openPowerVrGraphicsSettings() },
+            gpu = drivers.state(experimentalGraphics),
             gpuActions = com.droiddeck.launcher.ui.GpuDriversActions(
                 onAuto = { on -> drivers.setMode(on) },
                 onPair = { key -> drivers.selectPair(key) },
                 onRefresh = { if (drivers.mode == SessionPrefs.GPU_DRIVERS_AUTO) drivers.ensureAuto(force = true) else drivers.checkLatestTurnip() },
                 // Picking one driver on its own is Manual: Auto would put its pair back.
-                onSelectLinux = { id -> drivers.selectDriver(id, linux = true) },
-                onSelectAndroid = { id -> drivers.selectDriver(id, linux = false) },
+                onSelectLinux = { id -> drivers.selectDriver(id, linux = true); refreshPowerVrGraphicsStatus() },
+                onSelectAndroid = { id -> drivers.selectDriver(id, linux = false); refreshPowerVrGraphicsStatus() },
                 onRemoveLinux = { id -> drivers.deleteDriver(id, linux = true) },
                 onRemoveAndroid = { id -> drivers.deleteDriver(id, linux = false) },
                 onDownloadDriver = { name -> drivers.downloadReleaseDriver(name) },
@@ -1205,6 +1219,7 @@ class MainActivity : ComponentActivity() {
                 onImportAndroid = { pickAndroidDriver.launch(InAppFilePicker.buildIntent(this, ZIP_EXT, getString(R.string.drivers_pick_android))) },
                 onImportZip = { pickAnyDriver.launch(InAppFilePicker.buildIntent(this, ZIP_EXT, getString(R.string.drivers_pick_any))) },
                 onRestoreBundled = { TurnipDriver(this).restoreBundled(); drivers.refreshDrivers() },
+                onGraphicsSettings = { openPowerVrGraphicsSettings() },
             ),
         )
     }
@@ -1805,7 +1820,10 @@ class MainActivity : ComponentActivity() {
 
     private fun chooseExperimentalPowerVrGraphics() {
         val current = powerVrGraphicsDialog ?: return
-        if (!current.compatible) return
+        if (!SystemVulkanDriver.usesDefault(SessionPrefs.linuxDriver(this))) {
+            powerVrGraphicsDialog = current.copy(compatible = false)
+            return
+        }
         val operation = powerVrLaunch.nextOperation()
         powerVrGraphicsDialog = current.copy(working = true, progress = -1, failed = false, failureMessage = null)
         Thread({
@@ -1832,7 +1850,10 @@ class MainActivity : ComponentActivity() {
         Log.e(TAG, message, error)
         ui.post {
             if (powerVrLaunch.isCurrent(operation) && powerVrGraphicsDialog != null && !isDestroyed) {
-                powerVrGraphicsDialog = powerVrGraphicsDialog?.copy(working = false, progress = -1, failed = true, failureMessage = error.message)
+                powerVrGraphicsDialog = powerVrGraphicsDialog?.copy(
+                    working = false, progress = -1, failed = true, failureMessage = error.message,
+                    compatible = SystemVulkanDriver.usesDefault(SessionPrefs.linuxDriver(this)),
+                )
             }
         }
     }
@@ -1842,6 +1863,7 @@ class MainActivity : ComponentActivity() {
             if (!powerVrLaunch.isCurrent(operation) || isFinishing || isDestroyed) return@post
             powerVrGraphicsStatus = getString(status)
             powerVrGraphicsDialog = null
+            refreshPowerVrGraphicsStatus()
             if (powerVrLaunch.markReady(operation)) finishPendingPowerVrLaunch()
         }
     }
@@ -1879,18 +1901,32 @@ class MainActivity : ComponentActivity() {
         val generation = ++powerVrStatusGeneration
         if (!SystemVulkanDriver.isPowerVr() || !LinuxRuntime.isInstalled(this)) {
             powerVrGraphicsStatus = null
+            experimentalGraphics = ExperimentalGraphicsState()
             return
         }
+        val choice = PowerVrGraphicsProfile.choice(this)
+        val selected = choice.mode == PowerVrGraphicsProfile.Mode.EXPERIMENTAL
+        val compatible = SystemVulkanDriver.usesDefault(SessionPrefs.linuxDriver(this))
+        experimentalGraphics = ExperimentalGraphicsState(
+            selected = selected, selectedVersion = choice.version, compatible = compatible, checking = selected,
+        )
         if (powerVrGraphicsStatus == null) powerVrGraphicsStatus = getString(R.string.power_vr_graphics_checking)
         Thread({
             try {
-                val choice = PowerVrGraphicsProfile.choice(this)
-                val current = if (choice.mode == PowerVrGraphicsProfile.Mode.EXPERIMENTAL) {
-                    PowerVrGraphicsProfile.currentVersion(this)
-                } else null
                 val installed = choice.version?.let { PowerVrGraphicsProfile.isInstalled(this, it) } == true
+                val available = runCatching { if (selected) PowerVrGraphicsProfile.currentVersion(this) else null }
+                available.exceptionOrNull()?.let { Log.w(TAG, "PowerVR graphics update check failed", it) }
+                val current = available.getOrNull()
+                val dxvkRevision = if (installed) runCatching {
+                    choice.version?.let { PowerVrGraphicsProfile.installedDxvkRevision(this, it) }
+                }.getOrNull() else null
                 ui.post {
                     if (powerVrStatusGeneration != generation || isDestroyed) return@post
+                    experimentalGraphics = ExperimentalGraphicsState(
+                        selected = selected, selectedVersion = choice.version, availableVersion = current,
+                        selectedInstalled = installed, compatible = compatible,
+                        selectedDxvkRevision = dxvkRevision, updateCheckFailed = available.isFailure,
+                    )
                     powerVrGraphicsStatus = getString(when (choice.mode) {
                         PowerVrGraphicsProfile.Mode.UNDECIDED -> R.string.power_vr_graphics_choose_before_launch
                         PowerVrGraphicsProfile.Mode.STANDARD -> R.string.power_vr_graphics_standard_status
@@ -1905,7 +1941,8 @@ class MainActivity : ComponentActivity() {
                 Log.e(TAG, "PowerVR graphics status failed", error)
                 ui.post {
                     if (powerVrStatusGeneration == generation && !isDestroyed) {
-                        powerVrGraphicsStatus = getString(R.string.power_vr_graphics_choose_before_launch)
+                        experimentalGraphics = experimentalGraphics.copy(checking = false)
+                        powerVrGraphicsStatus = getString(if (selected) R.string.power_vr_graphics_experimental_repair_status else R.string.power_vr_graphics_choose_before_launch)
                     }
                 }
             }

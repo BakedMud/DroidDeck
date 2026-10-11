@@ -1,0 +1,5 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="gpu_runtime_powervr">System PowerVR</string>
+    <string name="drivers_runtime_powervr">Uses the phone\'s PowerVR driver through the libhybris bridge bundled with this APK.</string>
+</resources>

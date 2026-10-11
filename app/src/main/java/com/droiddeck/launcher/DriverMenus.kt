@@ -11,15 +11,18 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.setValue
 import androidx.compose.runtime.mutableIntStateOf
+import com.droiddeck.launcher.core.ExperimentalGraphicsState
 import com.droiddeck.launcher.gpu.DriverBundle
 import com.droiddeck.launcher.gpu.DriverPairs
 import com.droiddeck.launcher.gpu.GpuInfo
 import com.droiddeck.launcher.gpu.LinuxVulkanDriver
 import com.droiddeck.launcher.gpu.LinuxVulkanDriverManager
+import com.droiddeck.launcher.gpu.SystemVulkanDriver
 import com.droiddeck.launcher.gpu.TurnipDriver
 import com.droiddeck.launcher.gpu.TurnipReleases
 import com.droiddeck.launcher.session.SessionService
 import com.droiddeck.launcher.session.SessionPrefs
+import com.droiddeck.launcher.session.PowerVrGraphicsProfile
 import com.droiddeck.launcher.ui.DriverRow
 import com.droiddeck.launcher.ui.GpuDriversState
 import com.droiddeck.launcher.ui.PairRow
@@ -57,7 +60,7 @@ internal class DriverMenus(private val activity: Activity, private val ui: Handl
     var activeBundle by mutableStateOf<String?>(null)
     private var autoCheckedThisProcess = false
 
-    fun state() = GpuDriversState(
+    fun state(experimentalGraphics: ExperimentalGraphicsState = ExperimentalGraphicsState()) = GpuDriversState(
         gpuName = gpu.displayName(activity), gpuFamily = gpu.family.label(activity), soc = gpu.soc, supportText = gpu.supportText(activity),
         supported = gpu.support == GpuInfo.Support.TESTED, unsupported = gpu.support == GpuInfo.Support.UNSUPPORTED,
         auto = mode == SessionPrefs.GPU_DRIVERS_AUTO, pairs = pairRows, busy = pairBusy, percent = pairPercent,
@@ -65,6 +68,7 @@ internal class DriverMenus(private val activity: Activity, private val ui: Handl
         linuxRows = linuxRows, linuxSelected = linuxSelected, androidRows = androidRows, androidSelected = androidSelected,
         linuxDownloads = linuxDownloads, androidDownloads = androidDownloads, canRestoreBundled = canRestoreBundled,
         activeBundle = activeBundle,
+        experimentalGraphics = experimentalGraphics,
     )
     var androidRows by mutableStateOf<List<DriverRow>>(emptyList())
     var androidSelected by mutableStateOf("")
@@ -77,8 +81,14 @@ internal class DriverMenus(private val activity: Activity, private val ui: Handl
             DriverRow(id, it.label, activity.getString(if (linux) R.string.drivers_bundle_sets_display else R.string.drivers_bundle_sets_runtime), true, DriverRow.BUNDLE)
         }
         linuxRows = LinuxVulkanDriver.optionValues(activity).map { id ->
-            if (id.isEmpty()) DriverRow("", activity.getString(R.string.gpu_runtime_default), activity.getString(R.string.drivers_runtime_builtin), false)
-            else bundleRow(id, linux = true) ?: DriverRow(
+            if (id.isEmpty()) {
+                val systemPowerVr = SystemVulkanDriver.usesDefault(id)
+                DriverRow(
+                    "", activity.getString(if (systemPowerVr) R.string.gpu_runtime_powervr else R.string.gpu_runtime_default),
+                    activity.getString(if (systemPowerVr) R.string.drivers_runtime_powervr else R.string.drivers_runtime_builtin),
+                    false,
+                )
+            } else bundleRow(id, linux = true) ?: DriverRow(
                 id, lm.getDriverName(id),
                 listOfNotNull(
                     lm.getDriverVersion(id).takeIf { it.isNotEmpty() },
@@ -152,6 +162,11 @@ internal class DriverMenus(private val activity: Activity, private val ui: Handl
     fun ensureAuto(force: Boolean) {
         mode = SessionPrefs.gpuDriverMode(activity)
         if (mode != SessionPrefs.GPU_DRIVERS_AUTO || pairBusy != null || releaseChecking) return
+        if (experimentalSelected()) {
+            autoStatus = activity.getString(R.string.gpu_experimental_selection_disabled)
+            if (force) checkLatestTurnip()
+            return
+        }
         if (!force && autoCheckedThisProcess) return
         autoCheckedThisProcess = true
         if (DriverPairs.recommendedKey(gpu, emptyList()) == null) {
@@ -198,6 +213,10 @@ internal class DriverMenus(private val activity: Activity, private val ui: Handl
      */
     private fun installPair(pair: DriverPairs.DriverPair, auto: Boolean) {
         if (!pair.complete) return
+        if (experimentalSelected()) {
+            autoStatus = activity.getString(R.string.gpu_experimental_selection_disabled)
+            return
+        }
         pairBusy = pair.key
         pairPercent = 0
         if (auto) autoStatus = activity.getString(R.string.drivers_downloading_pair, pair.name, pair.version)
@@ -217,9 +236,16 @@ internal class DriverMenus(private val activity: Activity, private val ui: Handl
                 pairBusy = null
                 pairPercent = -1
                 result.onSuccess { (displayId, linuxId) ->
+                    // The graphics mode may have changed while the pair downloaded.
                     val displayChanged = SessionPrefs.androidDriver(activity) != displayId
-                    SessionPrefs.setAndroidDriver(activity, displayId)
-                    SessionPrefs.setLinuxDriver(activity, linuxId)
+                    if (!PowerVrGraphicsProfile.selectRuntimeIfAllowed(activity) {
+                        SessionPrefs.setAndroidDriver(activity, displayId)
+                        SessionPrefs.setLinuxDriver(activity, linuxId)
+                    }) {
+                        autoStatus = activity.getString(R.string.gpu_experimental_selection_disabled)
+                        refreshDrivers()
+                        return@onSuccess
+                    }
                     val restart = displayChanged && CompositorHost.isStarted
                     if (auto) {
                         val previous = SessionPrefs.gpuAutoInstalled(activity)
@@ -334,8 +360,18 @@ internal class DriverMenus(private val activity: Activity, private val ui: Handl
      */
     fun selectDriver(id: String, linux: Boolean) {
         val bundle = DriverBundle.containing(activity, id, linux)
+        if (experimentalSelected() && (bundle != null || linux && id.isNotEmpty())) {
+            android.widget.Toast.makeText(activity, R.string.gpu_experimental_selection_disabled, android.widget.Toast.LENGTH_LONG).show()
+            return
+        }
         when {
             bundle != null -> useBundle(bundle)
+            linux && id.isNotEmpty() -> {
+                if (!PowerVrGraphicsProfile.selectRuntimeIfAllowed(activity) { SessionPrefs.setLinuxDriver(activity, id) }) {
+                    android.widget.Toast.makeText(activity, R.string.gpu_experimental_selection_disabled, android.widget.Toast.LENGTH_LONG).show()
+                    return
+                }
+            }
             linux -> SessionPrefs.setLinuxDriver(activity, id)
             else -> SessionPrefs.setAndroidDriver(activity, id)
         }
@@ -345,14 +381,21 @@ internal class DriverMenus(private val activity: Activity, private val ui: Handl
 
     /** Set both halves of [bundle] as the drivers in use; returns what to tell the user. */
     private fun useBundle(bundle: DriverBundle.Bundle): String {
+        // Importing a bundle may store it, but must not replace Experimental's runtime driver.
+        if (experimentalSelected()) return activity.getString(R.string.gpu_experimental_selection_disabled)
         val displayChanged = SessionPrefs.androidDriver(activity) != bundle.androidId
-        DriverBundle.select(activity, bundle)
+        if (!PowerVrGraphicsProfile.selectRuntimeIfAllowed(activity) { DriverBundle.select(activity, bundle) }) {
+            return activity.getString(R.string.gpu_experimental_selection_disabled)
+        }
         if (mode == SessionPrefs.GPU_DRIVERS_AUTO) setMode(false)
         return activity.getString(
             if (displayChanged && CompositorHost.isStarted) R.string.drivers_using_bundle_restart else R.string.drivers_using_bundle,
             bundle.label,
         )
     }
+
+    private fun experimentalSelected(): Boolean = SystemVulkanDriver.isPowerVr() &&
+        PowerVrGraphicsProfile.choice(activity).mode == PowerVrGraphicsProfile.Mode.EXPERIMENTAL
 
     /**
      * Delete an imported or downloaded driver. A mode still set to it goes back to its default, so a

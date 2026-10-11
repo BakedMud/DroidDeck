@@ -29,6 +29,7 @@ import androidx.compose.ui.input.InputMode
 import androidx.compose.ui.focus.focusRequester
 import androidx.compose.ui.focus.FocusRequester
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.draw.alpha
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.font.FontFamily
@@ -39,10 +40,13 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.droiddeck.launcher.R
+import com.droiddeck.launcher.core.ExperimentalGraphicsState
 import com.droiddeck.launcher.core.GameEnvironment
 import com.droiddeck.launcher.core.GameEnvironmentOptions
 import com.droiddeck.launcher.frontend.Library
+import com.droiddeck.launcher.gpu.SystemVulkanDriver
 import com.droiddeck.launcher.session.GameEnvironmentStore
+import com.droiddeck.launcher.session.PowerVrGraphicsProfile
 import com.droiddeck.launcher.session.SessionPrefs
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
@@ -94,6 +98,7 @@ private fun GameEnvironmentEditor(byPad: Boolean, onClose: () -> Unit) {
     var busy by remember { mutableStateOf(false) }
     var error by remember { mutableStateOf(false) }
     var editing by remember { mutableStateOf<Pair<String, String>?>(null) }
+    var experimentalGraphics by remember { mutableStateOf(ExperimentalGraphicsState()) }
     val preset = SessionPrefs.fexPreset(context)
     val forceSsbs = SessionPrefs.forceSsbs(context)
     val firstFocus = remember { FocusRequester() }
@@ -102,9 +107,18 @@ private fun GameEnvironmentEditor(byPad: Boolean, onClose: () -> Unit) {
     LaunchedEffect(Unit) {
         runCatching {
             withContext(Dispatchers.IO) {
-                GameEnvironmentStore.read(context) to Library.steamGames(context).map { it.appId.toString() to it.name }
+                // Read the choice each time this dialog opens, including from an active session.
+                val selected = SystemVulkanDriver.isPowerVr() &&
+                    PowerVrGraphicsProfile.choice(context).mode == PowerVrGraphicsProfile.Mode.EXPERIMENTAL
+                Triple(
+                    GameEnvironmentStore.read(context),
+                    Library.steamGames(context).map { it.appId.toString() to it.name },
+                    ExperimentalGraphicsState(selected = selected),
+                )
             }
-        }.onSuccess { (settings, installed) -> config = settings; games = installed }
+        }.onSuccess { (settings, installed, graphics) ->
+            experimentalGraphics = graphics; config = settings; games = installed
+        }
             .onFailure { error = true }
     }
     fun save(next: GameEnvironment.Config) {
@@ -124,6 +138,7 @@ private fun GameEnvironmentEditor(byPad: Boolean, onClose: () -> Unit) {
         PadFocus(byPad, firstFocus)
         DialogHeader(stringResource(R.string.game_env_eyebrow), stringResource(R.string.game_env_title))
         Small(stringResource(R.string.game_env_applies))
+        if (experimentalGraphics.selected) Small(stringResource(R.string.game_env_experimental_overrides))
         // Which profile: everything shared, or one game's.
         Panel {
             Row(
@@ -164,15 +179,16 @@ private fun GameEnvironmentEditor(byPad: Boolean, onClose: () -> Unit) {
             if (entries.isEmpty()) Small(stringResource(R.string.game_env_empty))
             else Panel {
                 entries.entries.forEachIndexed { i, (name, value) ->
+                    val managed = experimentalGraphics.controlsEnvironmentKey(name)
                     if (i > 0) Box(Modifier.fillMaxWidth().padding(horizontal = 14.dp).heightIn(min = 1.dp, max = 1.dp).background(LocalPalette.current.line))
                     VariableRow(
-                        name, value, inherited = !own.containsKey(name), open = menu == "var:$name", enabled = !busy,
+                        name, value, inherited = !own.containsKey(name), open = menu == "var:$name", enabled = !busy && !managed,
                         onToggle = { menu = if (menu == "var:$name") null else "var:$name" }, onDismiss = { if (menu == "var:$name") menu = null },
                         onEdit = { menu = null; editByPad = dialogInput.inputMode == InputMode.Keyboard; editing = name to (value ?: "") },
                         // A value set here or inherited can be switched off for this profile; one set here can go back to inheriting.
                         onUnset = if (value != null) ({ menu = null; save(current.withEntries(scope, own + (name to null))) }) else null,
                         onRestore = if (own.containsKey(name)) ({ menu = null; save(current.withEntries(scope, own - name)) }) else null,
-                        shared = scope.isEmpty(),
+                        shared = scope.isEmpty(), managed = managed,
                     )
                 }
             }
@@ -184,21 +200,33 @@ private fun GameEnvironmentEditor(byPad: Boolean, onClose: () -> Unit) {
             if (current != null) Box {
                 SecondaryButton(stringResource(R.string.game_env_add), enabled = !busy) { menu = if (menu == "add") null else "add" }
                 AnchoredMenu(menu == "add", onDismiss = { if (menu == "add") menu = null }, title = stringResource(R.string.game_env_add)) { first ->
-                    for ((i, option) in GameEnvironmentOptions.all.withIndex()) MenuItem(option.name, checked = false, focusRequester = if (i == 0) first else null) {
-                        menu = null; editByPad = dialogInput.inputMode == InputMode.Keyboard; editing = option.name to option.value
+                    val firstEditable = GameEnvironmentOptions.all.firstOrNull { !experimentalGraphics.controlsEnvironmentKey(it.name) }
+                    for (option in GameEnvironmentOptions.all) {
+                        val managed = experimentalGraphics.controlsEnvironmentKey(option.name)
+                        MenuItem(
+                            option.name, checked = false, enabled = !managed,
+                            detail = if (managed) stringResource(R.string.game_env_experimental_managed) else null,
+                            focusRequester = if (option == firstEditable) first else null,
+                        ) {
+                            menu = null; editByPad = dialogInput.inputMode == InputMode.Keyboard; editing = option.name to option.value
+                        }
                     }
                     MenuItem(stringResource(R.string.game_env_custom), checked = false) { menu = null; editByPad = dialogInput.inputMode == InputMode.Keyboard; editing = "" to "" }
                 }
             }
-            if (current != null && current.entries(scope).isNotEmpty()) FocusText(stringResource(R.string.game_env_reset), LocalPalette.current.signal) {
-                save(current.withEntries(scope, emptyMap()))
+            if (current != null && current.entries(scope).keys.any { !experimentalGraphics.controlsEnvironmentKey(it) }) FocusText(
+                stringResource(if (experimentalGraphics.selected) R.string.game_env_experimental_reset else R.string.game_env_reset),
+                LocalPalette.current.signal,
+            ) {
+                if (!busy) save(current.withEntries(scope, current.entries(scope).filterKeys(experimentalGraphics::controlsEnvironmentKey)))
             }
             Spacer(Modifier.weight(1f))
             PrimaryButton(stringResource(R.string.game_env_done), enabled = !busy, onClick = close)
         }
     }
     editing?.let { (name, value) ->
-        VariableDialog(name, value, profileName, editByPad, onDismiss = { editing = null }) { key, content ->
+        VariableDialog(name, value, profileName, editByPad, experimentalGraphics, onDismiss = { editing = null }) { key, content ->
+            if (experimentalGraphics.controlsEnvironmentKey(name) || experimentalGraphics.controlsEnvironmentKey(key)) return@VariableDialog
             config?.let {
                 val entries = it.entries(scope).toMutableMap()
                 if (name.isNotEmpty() && name != key) entries[name] = null
@@ -218,7 +246,7 @@ private fun Panel(content: @Composable androidx.compose.foundation.layout.Column
 /** One variable: its name, what it is set to (and whether that comes from the shared profile), and a menu of what to do with it. */
 @Composable
 private fun VariableRow(
-    name: String, value: String?, inherited: Boolean, open: Boolean, enabled: Boolean, shared: Boolean,
+    name: String, value: String?, inherited: Boolean, open: Boolean, enabled: Boolean, shared: Boolean, managed: Boolean,
     onToggle: () -> Unit, onDismiss: () -> Unit, onEdit: () -> Unit, onUnset: (() -> Unit)?, onRestore: (() -> Unit)?,
 ) {
     val colors = MaterialTheme.colorScheme
@@ -226,13 +254,14 @@ private fun VariableRow(
         verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(12.dp),
         modifier = Modifier.fillMaxWidth().padding(horizontal = 14.dp, vertical = 10.dp),
     ) {
-        Column(Modifier.weight(1f)) {
+        Column(Modifier.weight(1f).alpha(if (managed) 0.5f else 1f)) {
             Text(name, fontSize = 13.sp, fontFamily = FontFamily.Monospace, fontWeight = FontWeight.SemiBold, color = colors.onBackground, maxLines = 1, overflow = TextOverflow.Ellipsis)
-            if (inherited) Text(stringResource(if (shared) R.string.game_env_default else R.string.game_env_inherited), fontSize = 12.sp, color = colors.onSurfaceVariant)
+            if (managed) Text(stringResource(R.string.game_env_experimental_managed), fontSize = 12.sp, color = colors.onSurfaceVariant)
+            else if (inherited) Text(stringResource(if (shared) R.string.game_env_default else R.string.game_env_inherited), fontSize = 12.sp, color = colors.onSurfaceVariant)
         }
         Box {
             ValueChip(value ?: stringResource(R.string.game_env_off), open, enabled = enabled, modifier = Modifier.widthIn(max = 200.dp), onClick = onToggle)
-            AnchoredMenu(open, onDismiss = onDismiss, title = name) { first ->
+            AnchoredMenu(open && enabled, onDismiss = onDismiss, title = name) { first ->
                 MenuItem(stringResource(R.string.game_env_change), checked = false, focusRequester = first, onClick = onEdit)
                 if (onUnset != null) MenuItem(stringResource(if (shared) R.string.game_env_remove else R.string.game_env_unset), checked = false, onClick = onUnset)
                 if (onRestore != null) MenuItem(stringResource(if (shared) R.string.game_env_restore_default else R.string.game_env_restore), checked = false, onClick = onRestore)
@@ -242,41 +271,54 @@ private fun VariableRow(
 }
 
 @Composable
-private fun VariableDialog(initialName: String, initialValue: String, profile: String, byPad: Boolean, onDismiss: () -> Unit, onSave: (String, String) -> Unit) {
+private fun VariableDialog(initialName: String, initialValue: String, profile: String, byPad: Boolean, experimentalGraphics: ExperimentalGraphicsState, onDismiss: () -> Unit, onSave: (String, String) -> Unit) {
     val shown = rememberShown(onDismiss)
     val close = { shown.targetState = false }
     var name by remember { mutableStateOf(initialName) }
     var value by remember { mutableStateOf(initialValue) }
     val valid = GameEnvironment.validName(name) && GameEnvironment.validValue(value)
+    val managed = experimentalGraphics.controlsEnvironmentKey(name)
     val option = GameEnvironmentOptions.find(name)
     val nameFocus = remember { FocusRequester() }
     AppDialog(shown, close, "gameEnvVar", wide = false) {
         PadFocus(byPad, nameFocus)
         DialogHeader(profile, stringResource(if (initialName.isEmpty()) R.string.game_env_add else R.string.game_env_change_title))
-        VariableNamePicker(name, nameFocus) { selected ->
+        VariableNamePicker(name, nameFocus, experimentalGraphics) { selected ->
             name = selected
             value = GameEnvironmentOptions.find(selected)?.value.orEmpty()
         }
-        VariableValueEditor(name, value) { value = it }
-        if (!GameEnvironment.supported(name)) Small(stringResource(R.string.game_env_unused))
+        if (managed) {
+            SettingsRow(stringResource(R.string.game_env_value), null) {
+                ValueChip(value.ifEmpty { stringResource(R.string.game_env_select_value) }, open = false, enabled = false) {}
+            }
+            Small(stringResource(R.string.game_env_experimental_overrides))
+        } else VariableValueEditor(name, value) { value = it }
+        if (!managed && !GameEnvironment.supported(name)) Small(stringResource(R.string.game_env_unused))
         if (!valid && name.isNotEmpty()) Small(stringResource(R.string.game_env_invalid), error = true)
         DialogFooter(
             note = option?.takeIf { it.detail != 0 }?.let { stringResource(it.detail) },
-            confirm = stringResource(R.string.game_env_save), enabled = valid, onCancel = close,
+            confirm = stringResource(R.string.game_env_save), enabled = valid && !managed, onCancel = close,
         ) { onSave(name, value); close() }
     }
 }
 
 @Composable
-private fun VariableNamePicker(name: String, focus: FocusRequester, onChange: (String) -> Unit) {
+private fun VariableNamePicker(name: String, focus: FocusRequester, experimentalGraphics: ExperimentalGraphicsState, onChange: (String) -> Unit) {
     var open by remember { mutableStateOf(false) }
     var custom by remember { mutableStateOf(name.isEmpty() || GameEnvironmentOptions.find(name) == null) }
     SettingsRow(stringResource(R.string.game_env_name), null, highlighted = open) {
         Box {
             ValueChip(if (custom) stringResource(R.string.game_env_custom) else name, open, modifier = Modifier.focusRequester(focus).widthIn(max = 260.dp)) { open = !open }
             AnchoredMenu(open, onDismiss = { open = false }, title = stringResource(R.string.game_env_name)) { first ->
-                for ((i, option) in GameEnvironmentOptions.all.sortedBy { it.name.uppercase(java.util.Locale.ROOT) }.withIndex()) {
-                    MenuItem(option.name, checked = !custom && option.name == name, focusRequester = if (i == 0) first else null) {
+                val options = GameEnvironmentOptions.all.sortedBy { it.name.uppercase(java.util.Locale.ROOT) }
+                val firstEditable = options.firstOrNull { !experimentalGraphics.controlsEnvironmentKey(it.name) }
+                for (option in options) {
+                    val managed = experimentalGraphics.controlsEnvironmentKey(option.name)
+                    MenuItem(
+                        option.name, checked = !custom && option.name == name, enabled = !managed,
+                        detail = if (managed) stringResource(R.string.game_env_experimental_managed) else null,
+                        focusRequester = if (option == firstEditable) first else null,
+                    ) {
                         custom = false; onChange(option.name); open = false
                     }
                 }

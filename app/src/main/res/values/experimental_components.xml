@@ -1,0 +1,15 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="comp_experimental_dxvk">DroidDeck Experimental DXVK</string>
+    <string name="comp_experimental_next_launch">Selected for next game launches. A running game is unchanged.</string>
+    <string name="comp_experimental_revision">Selected pack revision: %1$s</string>
+    <string name="comp_experimental_dxvk_revision">Custom DXVK source: %1$s</string>
+    <string name="comp_experimental_no_revision">No experimental pack revision is selected.</string>
+    <string name="comp_experimental_update_check_failed">Installed pack is ready; update check failed.</string>
+    <string name="comp_experimental_override">The custom DXVK release and graphics profile override manual DXVK choices. Choose Standard in Steam graphics to use the saved Proton choice.</string>
+    <string name="comp_experimental_graphics_settings">Steam graphics…</string>
+    <string name="comp_experimental_saved_dxvk">Saved Proton DXVK: %1$s</string>
+    <string name="comp_experimental_saved_queued">Saved Proton DXVK: %1$s · queued: %2$s</string>
+    <string name="comp_experimental_standard_only">Used with Standard</string>
+    <string name="comp_experimental_saved_choice">Saved choice</string>
+</resources>

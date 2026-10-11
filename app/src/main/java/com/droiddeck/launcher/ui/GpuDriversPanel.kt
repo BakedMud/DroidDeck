@@ -1,6 +1,7 @@
 package com.droiddeck.launcher.ui
 
 import com.droiddeck.launcher.R
+import com.droiddeck.launcher.core.ExperimentalGraphicsState
 import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.foundation.focusable
 import androidx.compose.material.icons.outlined.ExpandLess
@@ -97,6 +98,7 @@ class GpuDriversState(
     val canRestoreBundled: Boolean = false,
     /** The Android + Linux bundle both drivers are set to ("DD-Turnip 0.1.0"), or null. */
     val activeBundle: String? = null,
+    val experimentalGraphics: ExperimentalGraphicsState = ExperimentalGraphicsState(),
 ) {
     /** The pair both drivers are set to, if they make one. */
     val activePair: PairRow? get() = pairs.firstOrNull { it.active }
@@ -116,6 +118,7 @@ class GpuDriversActions(
     /** The tab's own import: a bundle, or a single driver of either kind. */
     val onImportZip: () -> Unit = {},
     val onRestoreBundled: () -> Unit = {},
+    val onGraphicsSettings: () -> Unit = {},
 )
 
 /**
@@ -131,6 +134,7 @@ internal fun GpuDriversPanel(s: GpuDriversState, a: GpuDriversActions, onAdvance
     var showAll by rememberSaveable { mutableStateOf(false) }
     Column(verticalArrangement = Arrangement.spacedBy(10.dp), modifier = Modifier.fillMaxWidth().padding(top = 12.dp)) {
         DeviceCard(s)
+        if (s.experimentalGraphics.selected) DriverSelectionNotice(stringResource(R.string.gpu_experimental_selection_disabled), a.onGraphicsSettings)
         if (!s.unsupported) {
             Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
                 ModeCard(Icons.Outlined.AutoAwesome, stringResource(R.string.common_auto), stringResource(R.string.gpu_auto_hint), s.auto, Modifier.weight(1f)) { a.onAuto(true) }
@@ -143,7 +147,7 @@ internal fun GpuDriversPanel(s: GpuDriversState, a: GpuDriversActions, onAdvance
                     if (s.checking) stringResource(R.string.gpu_checking) else stringResource(R.string.gpu_none_listed),
                     fontSize = 13.sp, color = colors.onSurfaceVariant, modifier = Modifier.padding(vertical = 8.dp),
                 )
-                for (p in shown) PairLine(p, s.busy == p.key, s.percent, enabled = s.busy == null) { a.onPair(p.key) }
+                for (p in shown) PairLine(p, s.busy == p.key, s.percent, enabled = s.busy == null && !s.experimentalGraphics.selected) { a.onPair(p.key) }
                 if (s.pairs.any { !it.suits }) FocusText(
                     if (showAll) stringResource(R.string.gpu_hide_other) else stringResource(R.string.gpu_show_other), pal.signal,
                 ) { showAll = !showAll }
@@ -151,10 +155,16 @@ internal fun GpuDriversPanel(s: GpuDriversState, a: GpuDriversActions, onAdvance
         }
         SettingsGroup(stringResource(R.string.gpu_advanced)) {
             SettingsRow(stringResource(R.string.comp_runtime_driver), s.activeBundle?.let { stringResource(R.string.gpu_set_with_display, it) } ?: stringResource(R.string.gpu_runtime_hint)) {
-                DriverDropdown(s.linuxRows, s.linuxSelected, stringResource(R.string.gpu_runtime_default), a.onSelectLinux) { onAdvanced("rt") }
+                DriverDropdown(
+                    s.linuxRows, s.linuxSelected, stringResource(R.string.gpu_runtime_default), a.onSelectLinux,
+                    selectionAllowed = { s.experimentalGraphics.allowsRuntimeDriver(it.id) },
+                ) { onAdvanced("rt") }
             }
             SettingsRow(stringResource(R.string.comp_display_driver), s.activeBundle?.let { stringResource(R.string.gpu_set_with_runtime, it) } ?: stringResource(R.string.gpu_display_hint)) {
-                DriverDropdown(s.androidRows, s.androidSelected, stringResource(R.string.gpu_auto_by_gpu), a.onSelectAndroid) { onAdvanced("panel") }
+                DriverDropdown(
+                    s.androidRows, s.androidSelected, stringResource(R.string.gpu_auto_by_gpu), a.onSelectAndroid,
+                    selectionAllowed = { s.experimentalGraphics.allowsDisplayDriver(it.id.isNotEmpty() && it.tag == DriverRow.BUNDLE) },
+                ) { onAdvanced("panel") }
             }
         }
     }
@@ -165,7 +175,7 @@ internal fun GpuDriversPanel(s: GpuDriversState, a: GpuDriversActions, onAdvance
  * downloading and deleting them. An Android + Linux bundle's row is tagged, and picking it sets both.
  */
 @Composable
-private fun DriverDropdown(rows: List<DriverRow>, selected: String, fallback: String, onSelect: (String) -> Unit, onManage: () -> Unit) {
+private fun DriverDropdown(rows: List<DriverRow>, selected: String, fallback: String, onSelect: (String) -> Unit, selectionAllowed: (DriverRow) -> Boolean = { true }, onManage: () -> Unit) {
     val colors = MaterialTheme.colorScheme
     val pal = LocalPalette.current
     var open by remember { mutableStateOf(false) }
@@ -173,17 +183,18 @@ private fun DriverDropdown(rows: List<DriverRow>, selected: String, fallback: St
         SecondaryButton((rows.firstOrNull { it.id == selected }?.name ?: fallback) + "  ▾", compact = true) { open = true }
         DropdownMenu(open, onDismissRequest = { open = false }, modifier = Modifier.heightIn(max = 360.dp)) {
             for (row in rows) DropdownMenuItem(
-                leadingIcon = { Radio(row.id == selected) },
+                enabled = selectionAllowed(row),
+                leadingIcon = { Radio(row.id == selected, enabled = selectionAllowed(row)) },
                 text = {
                     Column {
                         Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                            Text(row.name, fontSize = 14.sp, fontWeight = FontWeight.SemiBold, color = if (row.id == selected) pal.signal else colors.onBackground, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                            Text(row.name, fontSize = 14.sp, fontWeight = FontWeight.SemiBold, color = if (!selectionAllowed(row)) colors.onSurfaceVariant else if (row.id == selected) pal.signal else colors.onBackground, maxLines = 1, overflow = TextOverflow.Ellipsis)
                             if (row.tag == DriverRow.BUNDLE) Text(driverTagLabel(row.tag), fontSize = 10.5.sp, fontWeight = FontWeight.Bold, letterSpacing = 1.sp, color = colors.onSurfaceVariant)
                         }
                         if (row.detail.isNotEmpty()) Text(row.detail, fontSize = 12.sp, color = colors.onSurfaceVariant, maxLines = 1, overflow = TextOverflow.Ellipsis)
                     }
                 },
-                onClick = { open = false; if (row.id != selected) onSelect(row.id) },
+                onClick = { open = false; if (row.id != selected && selectionAllowed(row)) onSelect(row.id) },
             )
             HorizontalDivider(color = pal.line)
             DropdownMenuItem(text = { Text(stringResource(R.string.gpu_manage), fontSize = 14.sp, color = pal.signal) }, onClick = { open = false; onManage() })
@@ -357,7 +368,7 @@ private fun PairLine(p: PairRow, busy: Boolean, percent: Int, enabled: Boolean, 
     val colors = MaterialTheme.colorScheme
     val pal = LocalPalette.current
     val src = remember { MutableInteractionSource() }
-    val hot = rememberHot(src)
+    val hot = rememberHot(src) && enabled
     val usable = enabled && p.complete && !p.active
     val fill = if (hot) pal.signal.copy(alpha = 0.14f) else Color.Transparent
     Row(
@@ -369,13 +380,13 @@ private fun PairLine(p: PairRow, busy: Boolean, percent: Int, enabled: Boolean, 
             .controllerConfirm(enabled = usable, onClick = onClick)
             .padding(horizontal = 14.dp, vertical = 8.dp),
     ) {
-        Radio(p.active)
+        Radio(p.active, enabled = enabled)
         Column(Modifier.weight(1f)) {
             Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                Text(p.name, fontSize = 14.5.sp, fontWeight = FontWeight.SemiBold, color = colors.onBackground, maxLines = 1, overflow = TextOverflow.Ellipsis, modifier = Modifier.weight(1f, fill = false))
+                Text(p.name, fontSize = 14.5.sp, fontWeight = FontWeight.SemiBold, color = if (enabled) colors.onBackground else colors.onSurfaceVariant, maxLines = 1, overflow = TextOverflow.Ellipsis, modifier = Modifier.weight(1f, fill = false))
                 if (p.recommended) Text(
-                    stringResource(R.string.gpu_recommended_caps), fontSize = 10.5.sp, fontWeight = FontWeight.Bold, letterSpacing = 1.sp, color = pal.good,
-                    modifier = Modifier.clip(RoundedCornerShape(5.dp)).background(pal.good.copy(alpha = 0.12f)).padding(horizontal = 6.dp, vertical = 2.dp),
+                    stringResource(R.string.gpu_recommended_caps), fontSize = 10.5.sp, fontWeight = FontWeight.Bold, letterSpacing = 1.sp, color = if (enabled) pal.good else colors.onSurfaceVariant,
+                    modifier = Modifier.clip(RoundedCornerShape(5.dp)).background(if (enabled) pal.good.copy(alpha = 0.12f) else Color.White.copy(alpha = 0.07f)).padding(horizontal = 6.dp, vertical = 2.dp),
                 )
             }
             Text("${p.version} · ${p.detail}", fontSize = 12.5.sp, color = colors.onSurfaceVariant, maxLines = 1, overflow = TextOverflow.Ellipsis)
@@ -385,18 +396,19 @@ private fun PairLine(p: PairRow, busy: Boolean, percent: Int, enabled: Boolean, 
                 Text(if (percent >= 0) "$percent%" else "…", fontSize = 12.sp, color = colors.onSurfaceVariant)
                 LinearProgressIndicator(progress = { percent.coerceAtLeast(0) / 100f }, modifier = Modifier.fillMaxWidth().padding(top = 4.dp))
             }
-            p.active -> Text(stringResource(R.string.comp_tag_in_use), fontSize = 13.sp, fontWeight = FontWeight.SemiBold, color = pal.signal)
+            p.active -> Text(stringResource(R.string.comp_tag_in_use), fontSize = 13.sp, fontWeight = FontWeight.SemiBold, color = if (enabled) pal.signal else colors.onSurfaceVariant)
             !p.complete -> Text(stringResource(R.string.gpu_unavailable), fontSize = 13.sp, color = colors.onSurfaceVariant)
-            p.installed -> Text(stringResource(R.string.common_use), fontSize = 13.sp, fontWeight = FontWeight.SemiBold, color = colors.onBackground)
-            else -> Text(stringResource(R.string.common_download), fontSize = 13.sp, fontWeight = FontWeight.SemiBold, color = colors.onBackground)
+            p.installed -> Text(stringResource(R.string.common_use), fontSize = 13.sp, fontWeight = FontWeight.SemiBold, color = if (enabled) colors.onBackground else colors.onSurfaceVariant)
+            else -> Text(stringResource(R.string.common_download), fontSize = 13.sp, fontWeight = FontWeight.SemiBold, color = if (enabled) colors.onBackground else colors.onSurfaceVariant)
         }
     }
 }
 
 @Composable
-private fun Radio(selected: Boolean) {
+private fun Radio(selected: Boolean, enabled: Boolean = true) {
     val pal = LocalPalette.current
-    Box(contentAlignment = Alignment.Center, modifier = Modifier.size(20.dp).clip(CircleShape).border(2.dp, if (selected) pal.signal else pal.line2, CircleShape)) {
-        if (selected) Box(Modifier.size(10.dp).clip(CircleShape).background(pal.signal))
+    val selectedColor = if (enabled) pal.signal else MaterialTheme.colorScheme.onSurfaceVariant
+    Box(contentAlignment = Alignment.Center, modifier = Modifier.size(20.dp).clip(CircleShape).border(2.dp, if (selected) selectedColor else pal.line2, CircleShape)) {
+        if (selected) Box(Modifier.size(10.dp).clip(CircleShape).background(selectedColor))
     }
 }

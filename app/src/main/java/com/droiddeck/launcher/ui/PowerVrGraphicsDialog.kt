@@ -1,20 +1,29 @@
 package com.droiddeck.launcher.ui
 
 import androidx.compose.foundation.background
-import androidx.compose.foundation.border
+import androidx.compose.foundation.hoverable
+import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.selection.selectable
+import androidx.compose.foundation.selection.selectableGroup
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.LinearProgressIndicator
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.RadioButton
+import androidx.compose.material3.RadioButtonDefaults
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.remember
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.clip
 import androidx.compose.ui.res.stringResource
+import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
@@ -58,6 +67,15 @@ internal fun PowerVrGraphicsDialog(
     val close = { onCancel(); shown.targetState = false }
     val selectedStandard = state.mode == PowerVrGraphicsProfile.Mode.STANDARD
     val selectedExperimental = state.mode == PowerVrGraphicsProfile.Mode.EXPERIMENTAL
+    val idle = !state.loading && !state.working
+    val experimentalAction = when {
+        state.failed -> R.string.power_vr_graphics_retry
+        state.needsRepair -> R.string.power_vr_graphics_repair
+        state.updateAvailable -> R.string.power_vr_graphics_update
+        selectedExperimental -> null
+        state.availableInstalled -> R.string.power_vr_graphics_use_experimental
+        else -> R.string.power_vr_graphics_download_experimental
+    }
 
     AppDialog(shown, close, "powerVrGraphics", wide = false, maxWidth = 640.dp) {
         DialogHeader(
@@ -77,20 +95,33 @@ internal fun PowerVrGraphicsDialog(
             lineHeight = 20.sp,
         )
 
-        PowerVrChoiceCard(
-            title = stringResource(R.string.power_vr_graphics_standard),
-            detail = stringResource(R.string.power_vr_graphics_standard_detail),
-            selected = selectedStandard,
-        )
-        PowerVrChoiceCard(
-            title = stringResource(R.string.power_vr_graphics_experimental),
-            detail = stringResource(R.string.power_vr_graphics_experimental_detail),
-            selected = selectedExperimental,
-            enabled = state.compatible,
-        )
+        Column(
+            verticalArrangement = Arrangement.spacedBy(8.dp),
+            modifier = Modifier.fillMaxWidth().selectableGroup(),
+        ) {
+            PowerVrChoiceRow(
+                title = stringResource(R.string.power_vr_graphics_standard),
+                detail = stringResource(R.string.power_vr_graphics_standard_detail),
+                selected = selectedStandard,
+                action = if (!selectedStandard || state.failed) stringResource(R.string.power_vr_graphics_use_standard) else null,
+                actionEnabled = idle && (!selectedStandard || state.failed),
+                onClick = onStandard,
+            )
+            PowerVrChoiceRow(
+                title = stringResource(R.string.power_vr_graphics_experimental),
+                detail = stringResource(R.string.power_vr_graphics_experimental_detail),
+                selected = selectedExperimental,
+                action = experimentalAction?.let { stringResource(it) },
+                available = state.compatible,
+                actionEnabled = idle && state.compatible &&
+                    (!selectedExperimental || state.needsRepair || state.updateAvailable || state.failed),
+                onClick = onExperimental,
+            )
+        }
 
         val status = when {
             state.loading -> stringResource(R.string.power_vr_graphics_checking)
+            state.working -> stringResource(R.string.power_vr_graphics_applying)
             state.failed -> state.failureMessage?.takeIf { it.isNotBlank() }
                 ?: stringResource(R.string.power_vr_graphics_failed)
             !state.compatible -> stringResource(R.string.power_vr_graphics_custom_driver)
@@ -100,7 +131,7 @@ internal fun PowerVrGraphicsDialog(
             state.availableInstalled -> stringResource(R.string.power_vr_graphics_downloaded)
             else -> stringResource(R.string.power_vr_graphics_shared_download)
         }
-        Small(status, error = state.failed || state.needsRepair || !state.compatible)
+        Small(status, error = idle && (state.failed || state.needsRepair || !state.compatible))
 
         if (state.working || state.loading) {
             if (state.progress >= 0) {
@@ -113,32 +144,7 @@ internal fun PowerVrGraphicsDialog(
             }
         }
 
-        val experimentalAction = when {
-            state.failed -> R.string.power_vr_graphics_retry
-            state.needsRepair -> R.string.power_vr_graphics_repair
-            state.updateAvailable -> R.string.common_update
-            else -> R.string.power_vr_graphics_experimental
-        }
         Small(stringResource(R.string.power_vr_graphics_next_game))
-        Row(
-            verticalAlignment = Alignment.CenterVertically,
-            horizontalArrangement = Arrangement.spacedBy(10.dp),
-            modifier = Modifier.fillMaxWidth(),
-        ) {
-            SecondaryButton(
-                stringResource(R.string.power_vr_graphics_standard),
-                modifier = Modifier.weight(1f),
-                enabled = !state.loading && !state.working && (!selectedStandard || state.failed),
-                onClick = onStandard,
-            )
-            PrimaryButton(
-                stringResource(experimentalAction),
-                modifier = Modifier.weight(1f),
-                enabled = !state.loading && !state.working && state.compatible &&
-                    (!selectedExperimental || state.needsRepair || state.updateAvailable || state.failed),
-                onClick = onExperimental,
-            )
-        }
         Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.End) {
             SecondaryButton(stringResource(R.string.common_cancel), onClick = close)
         }
@@ -146,31 +152,73 @@ internal fun PowerVrGraphicsDialog(
 }
 
 @Composable
-private fun PowerVrChoiceCard(title: String, detail: String, selected: Boolean, enabled: Boolean = true) {
+private fun PowerVrChoiceRow(
+    title: String,
+    detail: String,
+    selected: Boolean,
+    action: String?,
+    available: Boolean = true,
+    actionEnabled: Boolean,
+    onClick: () -> Unit,
+) {
     val colors = MaterialTheme.colorScheme
     val pal = LocalPalette.current
+    val source = remember { MutableInteractionSource() }
+    val hot = rememberHot(source) && actionEnabled
     val shape = RoundedCornerShape(14.dp)
     Column(
-        verticalArrangement = Arrangement.spacedBy(5.dp),
+        verticalArrangement = Arrangement.spacedBy(8.dp),
         modifier = Modifier.fillMaxWidth()
-            .background(if (selected) pal.signal.copy(alpha = 0.10f) else colors.surface.copy(alpha = 0.6f), shape)
-            .border(1.dp, if (selected) pal.signal.copy(alpha = 0.65f) else pal.line, shape)
+            .paneItem("power-vr-mode:$title")
+            .heightIn(min = 56.dp)
+            .clip(shape)
+            .background(if (selected || hot) pal.signal.copy(alpha = 0.10f) else colors.surface)
+            .glideBorder(hot, shape, pal.signal, pal.line)
+            .hoverable(source)
+            .selectable(
+                selected = selected,
+                enabled = actionEnabled,
+                role = Role.RadioButton,
+                interactionSource = source,
+                indication = null,
+                onClick = onClick,
+            )
+            .controllerConfirm(enabled = actionEnabled, onClick = onClick)
             .padding(horizontal = 14.dp, vertical = 12.dp),
     ) {
-        Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-            Text(
-                title,
-                color = if (enabled) colors.onBackground else colors.onSurfaceVariant,
-                fontSize = 15.sp,
-                fontWeight = FontWeight.SemiBold,
+        Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(12.dp)) {
+            Column(Modifier.weight(1f)) {
+                Text(
+                    title,
+                    color = if (available) colors.onBackground else colors.onSurfaceVariant,
+                    fontSize = 15.sp,
+                    fontWeight = FontWeight.SemiBold,
+                )
+                if (selected) Text(
+                    stringResource(R.string.power_vr_graphics_selected),
+                    color = pal.signal,
+                    fontSize = 12.sp,
+                    fontWeight = FontWeight.SemiBold,
+                )
+            }
+            RadioButton(
+                selected = selected,
+                onClick = null,
+                enabled = available,
+                colors = RadioButtonDefaults.colors(selectedColor = pal.signal, unselectedColor = colors.onSurfaceVariant),
             )
-            if (selected) Chip(stringResource(R.string.power_vr_graphics_selected), ok = true)
         }
         Text(
             detail,
-            color = colors.onSurfaceVariant.copy(alpha = if (enabled) 1f else 0.6f),
+            color = colors.onSurfaceVariant.copy(alpha = if (available) 1f else 0.6f),
             fontSize = 13.sp,
             lineHeight = 18.sp,
+        )
+        if (action != null) Text(
+            action,
+            color = if (actionEnabled) pal.signal else colors.onSurfaceVariant,
+            fontSize = 13.sp,
+            fontWeight = FontWeight.SemiBold,
         )
     }
 }

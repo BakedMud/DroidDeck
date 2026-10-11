@@ -1,0 +1,5 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="gpu_experimental_selection_disabled">Experimental graphics manages the runtime driver. Choose Standard in Steam graphics to select a custom runtime driver or driver pair.</string>
+    <string name="gpu_experimental_graphics_settings">Steam graphics…</string>
+</resources>

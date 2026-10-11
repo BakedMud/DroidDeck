@@ -2,6 +2,7 @@ package com.droiddeck.launcher.session
 
 import android.content.Context
 import android.util.AtomicFile
+import com.droiddeck.launcher.R
 import com.droiddeck.launcher.gpu.SystemVulkanDriver
 import com.droiddeck.launcher.runtime.GraphicsProfilePack
 import com.droiddeck.launcher.runtime.LinuxRuntime
@@ -73,6 +74,21 @@ object PowerVrGraphicsProfile {
 
     fun isInstalled(context: Context, version: String): Boolean =
         VERSION.matches(version) && GraphicsProfilePack.verify(packs(context), version)
+
+    /** Provenance from the selected installed pack, not from the APK's newer available manifest. */
+    fun installedDxvkRevision(context: Context, version: String): String? {
+        if (!VERSION.matches(version)) return null
+        val file = File(GraphicsProfilePack.directory(packs(context), version), "provenance/dxvk-source-commit")
+        if (!file.isFile || file.length() > 128) return null
+        return file.readText().trim().takeIf { it.matches(Regex("(?:[0-9a-f]{40}|[0-9a-f]{64})")) }
+    }
+
+    /** Serializes driver selection with enabling the profile, including completed downloads. */
+    internal fun selectRuntimeIfAllowed(context: Context, select: () -> Unit): Boolean = synchronized(transitionLock) {
+        if (SystemVulkanDriver.isPowerVr() && choice(context).mode == Mode.EXPERIMENTAL) return@synchronized false
+        select()
+        true
+    }
 
     /** Installs the current APK's profile but does not select it. This performs blocking I/O. */
     fun install(context: Context, onProgress: (Int) -> Unit = {}): String {
@@ -166,6 +182,9 @@ object PowerVrGraphicsProfile {
 
     private fun changeIf(context: Context, next: Choice, isCurrent: () -> Boolean): Boolean = synchronized(transitionLock) {
         if (!isCurrent()) return@synchronized false
+        if (next.mode == Mode.EXPERIMENTAL && !SystemVulkanDriver.usesDefault(SessionPrefs.linuxDriver(context))) {
+            throw IOException(context.getString(R.string.power_vr_graphics_custom_driver))
+        }
         val file = settings(context)
         val previous = try { file.readFully() } catch (_: java.io.FileNotFoundException) { null }
         writeChoice(file, next)

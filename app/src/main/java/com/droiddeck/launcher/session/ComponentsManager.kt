@@ -7,6 +7,7 @@ import android.util.Log
 import com.droiddeck.launcher.core.Downloader
 import com.droiddeck.launcher.core.FileUtils
 import com.droiddeck.launcher.gpu.GpuInfo
+import com.droiddeck.launcher.gpu.SystemVulkanDriver
 import com.droiddeck.launcher.runtime.LinuxRuntime
 import com.github.luben.zstd.ZstdInputStream
 import com.github.luben.zstd.ZstdOutputStream
@@ -522,6 +523,7 @@ object ComponentsManager {
         val p = proton(context, protonId)
         val wcp = File(packagesDir(context), safeName(file))
         val info = packageInfo(context, wcp)
+        checkManualSelection(context, info.comp)
         val state = loadState(context)
         if (inUse(context, p)) {
             state.sub("queued").sub(p.id).put(info.comp, JSONObject().put("kind", "package").put("file", wcp.name).put("label", info.version))
@@ -545,6 +547,7 @@ object ComponentsManager {
     }
 
     fun restore(context: Context, protonId: String, comp: String, protonVersion: String): String = synchronized(lock) {
+        checkManualSelection(context, comp)
         val p = proton(context, protonId)
         val wcp = File(originalsDir(context), "$protonId/${safeName(protonVersion)}/$comp.wcp")
         check(wcp.isFile) { context.getString(R.string.cmgr_original_missing) }
@@ -558,6 +561,14 @@ object ComponentsManager {
         state.sub("queued").optJSONObject(p.id)?.remove(comp)
         saveState(context, state)
         context.getString(R.string.cmgr_restore_done, LABEL[comp], p.name, protonVersion)
+    }
+
+    /** Recheck at the action boundary, including confirmations opened before a mode change. */
+    private fun checkManualSelection(context: Context, comp: String) {
+        check(comp != "dxvk" || !SystemVulkanDriver.isPowerVr() ||
+            PowerVrGraphicsProfile.choice(context).mode != PowerVrGraphicsProfile.Mode.EXPERIMENTAL) {
+            context.getString(R.string.comp_experimental_override)
+        }
     }
 
     private fun applyOriginal(context: Context, p: Proton, comp: String, protonVersion: String, wcp: File, state: JSONObject) {

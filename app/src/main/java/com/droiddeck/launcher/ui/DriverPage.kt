@@ -74,6 +74,9 @@ fun DriverPage(
     onImport: () -> Unit,
     onRestore: () -> Unit,
     onBack: () -> Unit,
+    selectionAllowed: (DriverRow) -> Boolean = { true },
+    selectionDisabledReason: String? = null,
+    onSelectionSettings: (() -> Unit)? = null,
 ) {
     val host = rememberMenuHost()
     val colors = MaterialTheme.colorScheme
@@ -81,10 +84,14 @@ fun DriverPage(
     var confirm by remember { mutableStateOf<DriverRow?>(null) }
     // Back (the controller's B too) closes this page only, back to the session's settings.
     BackHandler(onBack = onBack)
-    // D-pad: up from the first driver lands on refresh; the page opens with the driver in use focused.
+    // D-pad: up from the first selectable driver lands on refresh; skip disabled choices on entry.
     val refreshFocus = remember { FocusRequester() }
     val selectedFocus = remember { FocusRequester() }
-    LaunchedEffect(Unit) { runCatching { selectedFocus.requestFocus() } }
+    val firstSelectable = rows.firstOrNull(selectionAllowed)
+    val focusRow = rows.firstOrNull { it.id == selected && selectionAllowed(it) } ?: firstSelectable
+    LaunchedEffect(focusRow?.id) {
+        runCatching { if (focusRow == null) refreshFocus.requestFocus() else selectedFocus.requestFocus() }
+    }
     val refreshSrc = remember { MutableInteractionSource() }
     val refreshHot = refreshSrc.collectIsFocusedAsState().value || refreshSrc.collectIsHoveredAsState().value
     SettingsPage(
@@ -104,14 +111,15 @@ fun DriverPage(
             }
         },
     ) {
+        if (selectionDisabledReason != null) DriverSelectionNotice(selectionDisabledReason, onSelectionSettings)
         SettingsGroup(stringResource(R.string.driver_installed)) {
-            val focusRow = rows.firstOrNull { it.id == selected } ?: rows.firstOrNull()
-            rows.forEachIndexed { i, row ->
+            rows.forEach { row ->
                 InstalledRow(
-                    row, row.id == selected, onSelect = { onSelect(row.id) }, onDelete = { confirm = row },
+                    row, row.id == selected, selectionEnabled = selectionAllowed(row),
+                    onSelect = { if (selectionAllowed(row)) onSelect(row.id) }, onDelete = { confirm = row },
                     modifier = Modifier
                         .then(if (row === focusRow) Modifier.focusRequester(selectedFocus) else Modifier)
-                        .then(if (i == 0) Modifier.focusProperties { up = refreshFocus } else Modifier),
+                        .then(if (row === firstSelectable) Modifier.focusProperties { up = refreshFocus } else Modifier),
                 )
             }
         }
@@ -160,11 +168,12 @@ fun DriverPage(
 }
 
 @Composable
-private fun InstalledRow(row: DriverRow, selected: Boolean, onSelect: () -> Unit, onDelete: () -> Unit, modifier: Modifier = Modifier) {
+private fun InstalledRow(row: DriverRow, selected: Boolean, onSelect: () -> Unit, onDelete: () -> Unit, modifier: Modifier = Modifier, selectionEnabled: Boolean = true) {
     val colors = MaterialTheme.colorScheme
     val pal = LocalPalette.current
     val src = remember { MutableInteractionSource() }
-    val hot = src.collectIsFocusedAsState().value || src.collectIsHoveredAsState().value
+    val hot = (src.collectIsFocusedAsState().value || src.collectIsHoveredAsState().value) && selectionEnabled
+    val selectedColor = if (selectionEnabled) pal.signal else colors.onSurfaceVariant
     val shape = RoundedCornerShape(10.dp)
     // Two focus targets side by side - the driver itself, and its trash can - so a controller's
     // d-pad right reaches the trash can and left comes back. (Inside one clickable row the trash
@@ -175,26 +184,27 @@ private fun InstalledRow(row: DriverRow, selected: Boolean, onSelect: () -> Unit
     Row(
         verticalAlignment = Alignment.CenterVertically,
         modifier = Modifier.fillMaxWidth().padding(3.dp).clip(shape)
-            .background(if (hot) pal.signal.copy(alpha = 0.14f) else if (selected) pal.signal.copy(alpha = 0.08f) else Color.Transparent)
+            .background(if (hot) pal.signal.copy(alpha = 0.14f) else if (selected && selectionEnabled) pal.signal.copy(alpha = 0.08f) else Color.Transparent)
             .glideBorder(hot, shape, pal.signal),
     ) {
         Row(
             verticalAlignment = Alignment.CenterVertically,
             modifier = Modifier.weight(1f).then(modifier).focusRequester(mainFocus)
                 .then(if (row.removable) Modifier.focusProperties { right = delFocus } else Modifier)
-                .hoverable(src).clickable(interactionSource = src, indication = null, onClick = onSelect)
+                .hoverable(src).clickable(interactionSource = src, indication = null, enabled = selectionEnabled, onClick = onSelect)
+                .controllerConfirm(enabled = selectionEnabled, onClick = onSelect)
                 .padding(horizontal = 11.dp, vertical = 8.dp),
         ) {
             Box(
                 contentAlignment = Alignment.Center,
-                modifier = Modifier.size(20.dp).border(2.dp, if (selected) pal.signal else colors.onSurfaceVariant, CircleShape),
-            ) { if (selected) Box(Modifier.size(10.dp).background(pal.signal, CircleShape)) }
+                modifier = Modifier.size(20.dp).border(2.dp, if (selected) selectedColor else colors.onSurfaceVariant, CircleShape),
+            ) { if (selected) Box(Modifier.size(10.dp).background(selectedColor, CircleShape)) }
             Spacer(Modifier.width(14.dp))
             Column(Modifier.weight(1f)) {
                 Row(verticalAlignment = Alignment.CenterVertically) {
                     Text(
                         row.name, fontSize = 15.sp, fontWeight = FontWeight.SemiBold, maxLines = 1, overflow = TextOverflow.Ellipsis,
-                        color = if (selected) pal.signal else colors.onBackground, modifier = Modifier.weight(1f, fill = false),
+                        color = if (!selectionEnabled) colors.onSurfaceVariant else if (selected) pal.signal else colors.onBackground, modifier = Modifier.weight(1f, fill = false),
                     )
                     if (row.tag.isNotEmpty()) Text(
                         driverTagLabel(row.tag), fontSize = 11.5.sp, fontWeight = FontWeight.Bold, letterSpacing = 1.sp, color = colors.onSurfaceVariant,
@@ -214,26 +224,36 @@ private fun InstalledRow(row: DriverRow, selected: Boolean, onSelect: () -> Unit
                     .background(if (delHot) colors.error.copy(alpha = 0.16f) else Color.Transparent)
                     .glideBorder(delHot, RoundedCornerShape(10.dp), colors.error)
                     .focusRequester(delFocus)
-                    .focusProperties { left = mainFocus }
-                    .hoverable(delSrc).clickable(interactionSource = delSrc, indication = null, onClick = onDelete),
+                    .then(if (selectionEnabled) Modifier.focusProperties { left = mainFocus } else Modifier)
+                    .hoverable(delSrc).clickable(interactionSource = delSrc, indication = null, onClick = onDelete)
+                    .controllerConfirm(onClick = onDelete),
             ) { Icon(Icons.Outlined.Delete, contentDescription = stringResource(R.string.common_delete_named, row.name), tint = if (delHot) colors.error else colors.onSurfaceVariant, modifier = Modifier.size(20.dp)) }
         }
     }
     Box(Modifier.fillMaxWidth().height(1.dp).background(pal.line))
 }
 
+@Composable
+internal fun DriverSelectionNotice(reason: String, onSettings: (() -> Unit)?) {
+    Column(verticalArrangement = Arrangement.spacedBy(4.dp), modifier = Modifier.padding(vertical = 8.dp)) {
+        Small(reason)
+        if (onSettings != null) FocusText(stringResource(R.string.gpu_experimental_graphics_settings), LocalPalette.current.signal, onClick = onSettings)
+    }
+}
+
 /** A text button that shows where controller focus is: an outline in its own colour. */
 @Composable
-internal fun FocusText(text: String, color: Color, modifier: Modifier = Modifier, onClick: () -> Unit) {
+internal fun FocusText(text: String, color: Color, modifier: Modifier = Modifier, enabled: Boolean = true, onClick: () -> Unit) {
     val src = remember { MutableInteractionSource() }
-    val hot = src.collectIsFocusedAsState().value || src.collectIsHoveredAsState().value
+    val hot = (src.collectIsFocusedAsState().value || src.collectIsHoveredAsState().value) && enabled
     val shape = RoundedCornerShape(8.dp)
     Text(
-        text, fontSize = 14.sp, fontWeight = FontWeight.SemiBold, color = color,
+        text, fontSize = 14.sp, fontWeight = FontWeight.SemiBold, color = if (enabled) color else MaterialTheme.colorScheme.onSurfaceVariant,
         modifier = modifier.clip(shape)
             .background(if (hot) color.copy(alpha = 0.14f) else Color.Transparent)
             .glideBorder(hot, shape, color)
-            .hoverable(src).clickable(interactionSource = src, indication = null, onClick = onClick)
+            .hoverable(src).clickable(interactionSource = src, indication = null, enabled = enabled, onClick = onClick)
+            .controllerConfirm(enabled = enabled, onClick = onClick)
             .padding(horizontal = 12.dp, vertical = 8.dp),
     )
 }
