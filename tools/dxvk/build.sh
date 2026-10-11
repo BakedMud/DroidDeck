@@ -12,8 +12,11 @@ git -C "$work/source" fetch --depth=1 https://github.com/doitsujin/dxvk.git "$DX
 git -C "$work/source" checkout -q --detach FETCH_HEAD
 test "$(git -C "$work/source" rev-parse HEAD)" = "$DXVK_REVISION"
 git -C "$work/source" submodule update --init --recursive --depth=1
-git -C "$work/source" apply --check "$root/tools/dxvk/patches/0001-check-direct3d-bc-formats.patch"
-git -C "$work/source" apply "$root/tools/dxvk/patches/0001-check-direct3d-bc-formats.patch"
+for patch in "$root"/tools/dxvk/patches/*.patch; do
+  git -C "$work/source" apply --check "$patch"
+  git -C "$work/source" apply "$patch"
+done
+python3 "$root/tools/dxvk/check_present_sync.py" "$work/source/src/dxvk/dxvk_presenter.cpp"
 for arch in 32 64; do
   meson setup "$work/build$arch" "$work/source" --cross-file "$work/source/build-win$arch.txt" \
     --buildtype release --prefix "$out" --bindir "x$arch" --libdir "x$arch" -Db_ndebug=if-release --strip
@@ -23,6 +26,6 @@ done
 cp "$work/source/LICENSE" "$out/LICENSE"
 printf '%s\n' "$DXVK_REVISION" > "$out/source-commit"
 git -C "$work/source" submodule status --recursive > "$out/submodules.txt"
-cp "$root/tools/dxvk/patches/0001-check-direct3d-bc-formats.patch" "$out/downstream.patch"
+git -C "$work/source" diff > "$out/downstream.patch"
 tar --exclude-vcs --zstd -cf "$out/source.tar.zst" -C "$work/source" .
 (cd "$out" && find x32 x64 -name '*.dll' -type f -print0 | sort -z | xargs -0 sha256sum > SHA256SUMS)
