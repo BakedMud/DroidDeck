@@ -72,6 +72,13 @@ The system GPU paths use the existing SDL/Wayland swapchain backend. Their addit
   unsupported DMA-BUF allocations, optimal-image layout queries and foreign ownership transfers
   on the SDL path. Backends that forward or scan out input buffers retain their export behavior.
   The build tests the actual SHM texture flags for both backend types.
+- `0129-keep-swapchain-cursors-internal.patch`: keep Xwayland SHM cursor textures internal on
+  Vulkan-swapchain backends. The trace proves generic `CVulkanTexture` DMA-BUF-attribute cleanup
+  closed fd 0 after Wayland assigned it to Xwayland SHM; it does not identify an individual cursor
+  allocation or driver return as that source. SDL samples its cursor texture locally, so this removes
+  the remaining cursor external-FD ownership path. Cursor textures remain exportable for
+  hardware-plane and forwarding backends, and the existing linear requirement for a hardware cursor
+  plane is unchanged. The build tests the extracted production flags; device validation is pending.
 
 Sixteen more of Armada's patches are DRM/lease/HDR-on-KMS work for a native display, which this
 app's Wayland-hosted gamescope never reaches, or need a newer gamescope than the runtime has.

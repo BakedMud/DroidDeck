@@ -3,8 +3,9 @@
 
 Usage: python3 shm-buffer-memoizer-regression.py path/to/src/steamcompmgr.cpp [path/to/src/rendervulkan.cpp]
 
-This intentionally extracts the real production import and SHM texture-flag blocks
-after the patch stack has been applied.  A hand-maintained copy of either condition
+This intentionally extracts the real production import, SHM texture-flag, and cursor
+texture-flag blocks
+after the patch stack has been applied.  A hand-maintained copy of any condition
 would let the test pass while Gamescope regressed.
 """
 
@@ -20,6 +21,9 @@ NEXT_FUNCTION = "static int32_t\nwindow_last_done_commit_index"
 SHM_TEXTURE_FUNCTION = "gamescope::OwningRc<CVulkanTexture> vulkan_create_texture_from_wlr_buffer"
 SHM_TEXTURE_FLAGS = "CVulkanTexture::createFlags texCreateFlags;"
 SHM_TEXTURE_INIT = "if ( pTex->BInit"
+CURSOR_FUNCTION = "bool MouseCursor::getTexture()"
+CURSOR_NEXT_FUNCTION = "void MouseCursor::GetDesiredSize"
+CURSOR_TEXTURE_CREATE = "m_texture = vulkan_create_texture_from_bits"
 
 
 def extract_import_commit(source: str) -> str:
@@ -53,6 +57,43 @@ def extract_shm_texture_flags(source: str) -> str:
     return extracted
 
 
+def extract_cursor_texture_flags(source: str) -> str:
+    """Return the production cursor createFlags block before texture creation."""
+    try:
+        function = source.index(CURSOR_FUNCTION)
+        function_end = source.index(CURSOR_NEXT_FUNCTION, function)
+        cursor_function = source[function:function_end]
+        start = cursor_function.index(SHM_TEXTURE_FLAGS)
+        end = cursor_function.index(CURSOR_TEXTURE_CREATE, start)
+    except ValueError as error:
+        raise RuntimeError("could not locate the cursor texture createFlags block") from error
+
+    extracted = cursor_function[start:end]
+    required = ("bFlippable", "bLinear", "SupportsPlaneHardwareCursor")
+    if any(flag not in extracted for flag in required):
+        raise RuntimeError("cursor createFlags block is missing a required flag")
+    return extracted
+
+
+def verify_cursor_extractor_is_bounded() -> None:
+    """Reject a matching flag block belonging to a later cursor method."""
+    later_flags = "\n".join(
+        (
+            SHM_TEXTURE_FLAGS,
+            "texCreateFlags.bFlippable = true;",
+            "if ( GetBackend()->SupportsPlaneHardwareCursor() )",
+            "\ttexCreateFlags.bLinear = true;",
+            CURSOR_TEXTURE_CREATE,
+        )
+    )
+    fixture = f"{CURSOR_FUNCTION}\n{{}}\n{CURSOR_NEXT_FUNCTION}()\n{{}}\n{later_flags}"
+    try:
+        extract_cursor_texture_flags(fixture)
+    except RuntimeError:
+        return
+    raise RuntimeError("cursor flag extractor accepted flags outside MouseCursor::getTexture")
+
+
 STUBS = r'''
 #include <cassert>
 #include <cstdint>
@@ -71,6 +112,7 @@ struct CVulkanTexture
 		bool bSampled = false;
 		bool bTransferDst = false;
 		bool bFlippable = false;
+		bool bLinear = false;
 	};
 
 	int uploadedPixels = 0;
@@ -204,6 +246,13 @@ struct FakeBackend
 	{
 		return usesVulkanSwapchain;
 	}
+
+	bool SupportsPlaneHardwareCursor() const
+	{
+		return supportsPlaneHardwareCursor;
+	}
+
+	bool supportsPlaneHardwareCursor = false;
 };
 
 static FakeBackend g_backend;
@@ -236,6 +285,7 @@ static void Reset()
 	s_BufferMemos.Clear();
 	g_backend.imports = 0;
 	g_backend.usesVulkanSwapchain = false;
+	g_backend.supportsPlaneHardwareCursor = false;
 	g_uploads = 0;
 }
 
@@ -252,6 +302,26 @@ static void TestShmTextureFlags()
 	assert( hardwareFlags.bSampled );
 	assert( hardwareFlags.bTransferDst );
 	assert( hardwareFlags.bFlippable );
+}
+
+static void TestCursorTextureFlags()
+{
+	g_backend.usesVulkanSwapchain = true;
+	g_backend.supportsPlaneHardwareCursor = false;
+	CVulkanTexture::createFlags swapchainFlags = ProductionCursorTextureFlags();
+	assert( !swapchainFlags.bFlippable );
+	assert( !swapchainFlags.bLinear );
+
+	g_backend.usesVulkanSwapchain = false;
+	g_backend.supportsPlaneHardwareCursor = false;
+	CVulkanTexture::createFlags hardwareFlags = ProductionCursorTextureFlags();
+	assert( hardwareFlags.bFlippable );
+	assert( !hardwareFlags.bLinear );
+
+	g_backend.supportsPlaneHardwareCursor = true;
+	CVulkanTexture::createFlags planeFlags = ProductionCursorTextureFlags();
+	assert( planeFlags.bFlippable );
+	assert( planeFlags.bLinear );
 }
 
 static void TestReusedShmBuffersRefreshEveryCommit()
@@ -328,6 +398,7 @@ static void TestFailedImportIsNotMemoized()
 int main()
 {
 	TestShmTextureFlags();
+	TestCursorTextureFlags();
 	TestReusedShmBuffersRefreshEveryCommit();
 	TestDmaBufRetainsOneImportedTexture();
 	TestFailedImportIsNotMemoized();
@@ -342,20 +413,29 @@ def main() -> None:
             f"usage: {pathlib.Path(sys.argv[0]).name} src/steamcompmgr.cpp [src/rendervulkan.cpp]"
         )
 
+    verify_cursor_extractor_is_bounded()
     source_path = pathlib.Path(sys.argv[1])
     production = extract_import_commit(source_path.read_text())
     render_source_path = pathlib.Path(sys.argv[2]) if len(sys.argv) == 3 else source_path.with_name("rendervulkan.cpp")
     texture_flags = extract_shm_texture_flags(render_source_path.read_text())
+    cursor_flags = extract_cursor_texture_flags(source_path.read_text())
     texture_flag_harness = (
         "static CVulkanTexture::createFlags ProductionShmTextureFlags()\n{\n"
         + texture_flags
+        + "\treturn texCreateFlags;\n}\n"
+    )
+    cursor_flag_harness = (
+        "static CVulkanTexture::createFlags ProductionCursorTextureFlags()\n{\n"
+        + cursor_flags
         + "\treturn texCreateFlags;\n}\n"
     )
     temp_parent = os.environ.get("TMPDIR")
     with tempfile.TemporaryDirectory(prefix="gamescope-shm-memo-", dir=temp_parent) as temporary:
         cpp = pathlib.Path(temporary) / "shm-buffer-memoizer-regression.cpp"
         binary = pathlib.Path(temporary) / "shm-buffer-memoizer-regression"
-        cpp.write_text(STUBS + "\n" + production + "\n" + texture_flag_harness + "\n" + TESTS)
+        cpp.write_text(
+            STUBS + "\n" + production + "\n" + texture_flag_harness + "\n" + cursor_flag_harness + "\n" + TESTS
+        )
         compiler = os.environ.get("CXX", "g++")
         subprocess.run(
             [compiler, "-std=c++17", "-Wall", "-Wextra", "-Werror", "-UNDEBUG", str(cpp), "-o", str(binary)],
