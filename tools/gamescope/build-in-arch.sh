@@ -58,6 +58,9 @@ cd "$WORK"
 g++ -std=c++17 -Wall -Wextra -Werror -UNDEBUG -I pkg/arch/src/gamescope/src \
   tools/gamescope/tests/nested-swapchain.cpp -o pkg/test-nested-swapchain
 pkg/test-nested-swapchain
+g++ -std=c++17 -Wall -Wextra -Werror -UNDEBUG -I pkg/arch/src/gamescope/src \
+  tools/gamescope/tests/shm-commit-sync.cpp -o pkg/test-shm-commit-sync
+pkg/test-shm-commit-sync
 rm -rf out && mkdir -p out/usr/local/bin
 PKG=$(ls pkg/arch/gamescope-*.pkg.tar.* | grep -v -- '-debug-' | head -1)
 tar -xf "$PKG" -C out --strip-components=2 usr/bin/gamescope

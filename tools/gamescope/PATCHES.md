@@ -59,6 +59,10 @@ The system PowerVR driver uses the existing SDL/Wayland swapchain backend. Its a
 - `0124-sdl-preserve-explicit-refresh.patch` and `0125-sdl-wait-before-present.patch`: preserve
   configured refresh across SDL events and finish composition before presenting without a
   render-finished semaphore. The build runs the focused capability, format and refresh tests.
+- `0126-shm-commit-ready.patch`: mark an SHM texture ready after its synchronous upload instead
+  of exporting image memory and treating the returned DMA-BUF fd as a sync fence. Explicit
+  acquire events and real DMA-BUF commits retain their existing wait paths. The build compiles
+  and runs the extracted production dispatch against SHM, explicit-acquire and DMA-BUF mocks.
 
 Sixteen more of Armada's patches are DRM/lease/HDR-on-KMS work for a native display, which this
 app's Wayland-hosted gamescope never reaches, or need a newer gamescope than the runtime has.
