@@ -1,11 +1,11 @@
 #!/usr/bin/env python3
-"""Compile the production import_commit body against a small buffer test double.
+"""Compile production Gamescope SHM paths against small buffer test doubles.
 
-Usage: python3 shm-buffer-memoizer-regression.py path/to/src/steamcompmgr.cpp
+Usage: python3 shm-buffer-memoizer-regression.py path/to/src/steamcompmgr.cpp [path/to/src/rendervulkan.cpp]
 
-This intentionally extracts the real production function after the patch stack has
-been applied.  A hand-maintained copy of its cache condition would let the test
-pass while import_commit regressed.
+This intentionally extracts the real production import and SHM texture-flag blocks
+after the patch stack has been applied.  A hand-maintained copy of either condition
+would let the test pass while Gamescope regressed.
 """
 
 import os
@@ -17,6 +17,9 @@ import tempfile
 
 MEMOIZER = "static gamescope::CBufferMemoizer s_BufferMemos;"
 NEXT_FUNCTION = "static int32_t\nwindow_last_done_commit_index"
+SHM_TEXTURE_FUNCTION = "gamescope::OwningRc<CVulkanTexture> vulkan_create_texture_from_wlr_buffer"
+SHM_TEXTURE_FLAGS = "CVulkanTexture::createFlags texCreateFlags;"
+SHM_TEXTURE_INIT = "if ( pTex->BInit"
 
 
 def extract_import_commit(source: str) -> str:
@@ -33,6 +36,23 @@ def extract_import_commit(source: str) -> str:
     return extracted
 
 
+def extract_shm_texture_flags(source: str) -> str:
+    """Return the production SHM createFlags block after the staging copy."""
+    try:
+        function = source.index(SHM_TEXTURE_FUNCTION)
+        copied = source.index("memcpy( dst, src, stride * height );", function)
+        start = source.index(SHM_TEXTURE_FLAGS, copied)
+        end = source.index(SHM_TEXTURE_INIT, start)
+    except ValueError as error:
+        raise RuntimeError("could not locate the SHM texture createFlags block") from error
+
+    extracted = source[start:end]
+    required = ("bSampled", "bTransferDst", "bFlippable")
+    if any(flag not in extracted for flag in required):
+        raise RuntimeError("SHM createFlags block is missing a required flag")
+    return extracted
+
+
 STUBS = r'''
 #include <cassert>
 #include <cstdint>
@@ -46,6 +66,13 @@ STUBS = r'''
 struct wlr_buffer;
 struct CVulkanTexture
 {
+	struct createFlags
+	{
+		bool bSampled = false;
+		bool bTransferDst = false;
+		bool bFlippable = false;
+	};
+
 	int uploadedPixels = 0;
 };
 
@@ -165,11 +192,17 @@ struct FakeBackend
 {
 	gamescope::IBackendFb backendFb;
 	int imports = 0;
+	bool usesVulkanSwapchain = false;
 
 	gamescope::OwningRc<gamescope::IBackendFb> ImportDmabufToBackend( wlr_dmabuf_attributes * )
 	{
 		imports++;
 		return &backendFb;
+	}
+
+	bool UsesVulkanSwapchain() const
+	{
+		return usesVulkanSwapchain;
 	}
 };
 
@@ -202,7 +235,23 @@ static void Reset()
 {
 	s_BufferMemos.Clear();
 	g_backend.imports = 0;
+	g_backend.usesVulkanSwapchain = false;
 	g_uploads = 0;
+}
+
+static void TestShmTextureFlags()
+{
+	g_backend.usesVulkanSwapchain = true;
+	CVulkanTexture::createFlags swapchainFlags = ProductionShmTextureFlags();
+	assert( swapchainFlags.bSampled );
+	assert( swapchainFlags.bTransferDst );
+	assert( !swapchainFlags.bFlippable );
+
+	g_backend.usesVulkanSwapchain = false;
+	CVulkanTexture::createFlags hardwareFlags = ProductionShmTextureFlags();
+	assert( hardwareFlags.bSampled );
+	assert( hardwareFlags.bTransferDst );
+	assert( hardwareFlags.bFlippable );
 }
 
 static void TestReusedShmBuffersRefreshEveryCommit()
@@ -278,6 +327,7 @@ static void TestFailedImportIsNotMemoized()
 
 int main()
 {
+	TestShmTextureFlags();
 	TestReusedShmBuffersRefreshEveryCommit();
 	TestDmaBufRetainsOneImportedTexture();
 	TestFailedImportIsNotMemoized();
@@ -287,16 +337,25 @@ int main()
 
 
 def main() -> None:
-    if len(sys.argv) != 2:
-        raise SystemExit(f"usage: {pathlib.Path(sys.argv[0]).name} src/steamcompmgr.cpp")
+    if len(sys.argv) not in (2, 3):
+        raise SystemExit(
+            f"usage: {pathlib.Path(sys.argv[0]).name} src/steamcompmgr.cpp [src/rendervulkan.cpp]"
+        )
 
     source_path = pathlib.Path(sys.argv[1])
     production = extract_import_commit(source_path.read_text())
+    render_source_path = pathlib.Path(sys.argv[2]) if len(sys.argv) == 3 else source_path.with_name("rendervulkan.cpp")
+    texture_flags = extract_shm_texture_flags(render_source_path.read_text())
+    texture_flag_harness = (
+        "static CVulkanTexture::createFlags ProductionShmTextureFlags()\n{\n"
+        + texture_flags
+        + "\treturn texCreateFlags;\n}\n"
+    )
     temp_parent = os.environ.get("TMPDIR")
     with tempfile.TemporaryDirectory(prefix="gamescope-shm-memo-", dir=temp_parent) as temporary:
         cpp = pathlib.Path(temporary) / "shm-buffer-memoizer-regression.cpp"
         binary = pathlib.Path(temporary) / "shm-buffer-memoizer-regression"
-        cpp.write_text(STUBS + "\n" + production + "\n" + TESTS)
+        cpp.write_text(STUBS + "\n" + production + "\n" + texture_flag_harness + "\n" + TESTS)
         compiler = os.environ.get("CXX", "g++")
         subprocess.run(
             [compiler, "-std=c++17", "-Wall", "-Wextra", "-Werror", "-UNDEBUG", str(cpp), "-o", str(binary)],

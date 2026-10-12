@@ -67,6 +67,11 @@ The system GPU paths use the existing SDL/Wayland swapchain backend. Their addit
   texture cache remains enabled for DMA-BUF imports, which reference the producer's allocation;
   SHM imports are snapshots and otherwise replay old pixels when a client reuses its buffers.
   The build tests the production import function with reused buffers and retained older commits.
+- `0128-keep-swapchain-shm-textures-internal.patch`: keep SHM uploads internal on Vulkan-swapchain
+  backends, which sample them locally rather than consuming exported input buffers. This avoids
+  unsupported DMA-BUF allocations, optimal-image layout queries and foreign ownership transfers
+  on the SDL path. Backends that forward or scan out input buffers retain their export behavior.
+  The build tests the actual SHM texture flags for both backend types.
 
 Sixteen more of Armada's patches are DRM/lease/HDR-on-KMS work for a native display, which this
 app's Wayland-hosted gamescope never reaches, or need a newer gamescope than the runtime has.
