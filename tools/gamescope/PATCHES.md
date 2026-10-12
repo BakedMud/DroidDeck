@@ -45,7 +45,7 @@ library list, before anything is published.
   `GAMESCOPE_FOCUSABLE_WINDOWS`, so the client kept its loading screen over the running game
   (Skyrim SE, A Plague Tale: Innocence, on the games' own Xwayland). MapNotify now refreshes the flag.
 
-The system PowerVR driver uses the existing SDL/Wayland swapchain backend. Its additional patches are:
+The system GPU paths use the existing SDL/Wayland swapchain backend. Their additional patches are:
 
 - `0120-nested-swapchain-capability-fallback.patch`: negotiate the surface's usages, mutable-format
   support, image count, alpha and extent; use offscreen composition and GPU copies when required.
@@ -63,6 +63,10 @@ The system PowerVR driver uses the existing SDL/Wayland swapchain backend. Its a
   of exporting image memory and treating the returned DMA-BUF fd as a sync fence. Explicit
   acquire events and real DMA-BUF commits retain their existing wait paths. The build compiles
   and runs the extracted production dispatch against SHM, explicit-acquire and DMA-BUF mocks.
+- `0127-refresh-shm-buffer-contents.patch`: upload a fresh texture for every SHM commit. The
+  texture cache remains enabled for DMA-BUF imports, which reference the producer's allocation;
+  SHM imports are snapshots and otherwise replay old pixels when a client reuses its buffers.
+  The build tests the production import function with reused buffers and retained older commits.
 
 Sixteen more of Armada's patches are DRM/lease/HDR-on-KMS work for a native display, which this
 app's Wayland-hosted gamescope never reaches, or need a newer gamescope than the runtime has.
