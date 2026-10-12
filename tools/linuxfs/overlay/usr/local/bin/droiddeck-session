@@ -336,6 +336,16 @@ bl_xprop_set_all() {
   [ "$ok" = 1 ]
 }
 export GDK_BACKEND=x11 QT_QPA_PLATFORM=xcb SDL_VIDEODRIVER=x11
+# Apply X11 presentation only after gamescope has started its client pass. This also
+# covers Vulkan programs launched from the rail and the file-manager desktop.
+bl_system_runtime=${DROIDDECK_SYSTEM_VULKAN_RUNTIME:-${DROIDDECK_POWERVR_RUNTIME:-}}
+if [ "${DROIDDECK_SYSTEM_VULKAN_GPU:-}" = mali ] && [ -n "$bl_system_runtime" ]; then
+  # The inner Xwayland has no DRI3 on Mali; the bundled WSI layer can use shared memory.
+  export VK_LAYER_PATH="$bl_system_runtime/wsi:$bl_system_runtime/lib"
+  export VK_INSTANCE_LAYERS=VK_LAYER_window_system_integration:VK_LAYER_HYBRIS_compat
+  export WSI_X11_FORCE_SHM=1 ENABLE_GAMESCOPE_WSI=0 VK_LOADER_LAYERS_DISABLE='*gamescope*'
+  unset DISABLE_WSI_LAYER
+fi
 # gamescope's reaper waits for every process left under it before the compositor comes down. A
 # process a game left behind - a Wine service blocked on a server that is already gone - is
 # reparented there when the client exits, and the screen stays black on it for good. Nothing of
@@ -812,7 +822,9 @@ BUSCONF
     bl_steam_path=$PATH
     bl_steam_angle=vulkan
     bl_steam_presentation=()
-    if [ "${BL_STEAM_GL_PRESENT:-}" = 1 ]; then
+    if [ "${DROIDDECK_SYSTEM_VULKAN_GPU:-}" = mali ] && [ -n "$bl_system_runtime" ]; then
+      echo "== steam: system Mali uses Vulkan with X11 shared-memory presentation"
+    elif [ "${BL_STEAM_GL_PRESENT:-}" = 1 ]; then
       bl_steam_path="/usr/local/libexec/droiddeck-steam:$PATH"
       # Keep the system driver for GPU rendering, but present Steam through ordinary DRI3.
       # The inner compositor has neither android_wlegl nor the bridge's TAWC-DRI extension.

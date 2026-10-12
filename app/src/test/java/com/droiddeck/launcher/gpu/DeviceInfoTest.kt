@@ -10,4 +10,9 @@ class DeviceInfoTest {
         assertEquals("the runtime's own Turnip", DeviceInfo.builtinDriverLabel(powerVr = false, runtime = true))
         assertEquals("System Vulkan", DeviceInfo.builtinDriverLabel(powerVr = false, runtime = false))
     }
+
+    @Test fun maliLabelsNameTheSystemDriverForBothRuntimeAndDisplay() {
+        assertEquals("System Mali", DeviceInfo.builtinDriverLabel(powerVr = false, runtime = true, mali = true))
+        assertEquals("System Mali", DeviceInfo.builtinDriverLabel(powerVr = false, runtime = false, mali = true))
+    }
 }

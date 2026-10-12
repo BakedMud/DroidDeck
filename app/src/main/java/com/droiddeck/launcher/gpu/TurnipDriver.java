@@ -27,7 +27,7 @@ import java.util.zip.ZipInputStream;
 /**
  * The Vulkan driver the in-app compositor runs on. Adreno uses Turnip: the system Adreno driver
  * does not implement VK_EXT_image_drm_format_modifier, so importing the dma-bufs gamescope hands
- * over fails and the session renders nothing. PowerVR uses the system driver and Android hardware
+ * over fails and the session renders nothing. PowerVR and Mali use the system driver and Android hardware
  * buffers instead. Two Turnip builds ship in the apk, one per Adreno
  * generation, and the GPU decides which is unpacked - unless the user has imported an AdrenoTools
  * zip of their own and chosen it, which then wins.
@@ -314,7 +314,7 @@ public final class TurnipDriver {
      * and falls through, so a stale preference never blocks a session.
      */
     private String choose() {
-        SessionPrefs.ensurePowerVrAutoDrivers(context);
+        SessionPrefs.ensureSystemVulkanAutoDrivers(context);
         String chosen = SessionPrefs.androidDriver(context);
         if (chosen != null && !chosen.isEmpty()) {
             if (BUNDLED.contains(chosen)) {
@@ -340,7 +340,7 @@ public final class TurnipDriver {
             if (forced.startsWith("a8")) return DRIVER_A8XX;
             if (forced.startsWith("a7")) return DRIVER_A7XX;
         }
-        if (SystemVulkanDriver.isPowerVr()) return null;
+        if (SystemVulkanDriver.isSupportedGpu()) return null;
         String model = gpuModel();
         Log.i(TAG, "gpu model: " + (model == null ? "unknown" : model));
         if (model != null) {

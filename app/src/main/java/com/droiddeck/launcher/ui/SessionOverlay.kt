@@ -261,6 +261,7 @@ class DrawerActions(
     val components: ComponentsManager.Snapshot? = null,
     /** DXVK is supplied by the selected system PowerVR runtime. */
     val systemPowerVr: Boolean = false,
+    val systemDriverLabel: Int = R.string.gpu_system_powervr,
     /** Re-reads the Protons (and runs swaps that waited for a game to close). */
     val onComponentsRefresh: () -> Unit = {},
     /** Installed games available for profile inspection in the session drawer. */
@@ -1029,7 +1030,7 @@ private fun SelectedGameProfileGroup(host: MenuHost, a: DrawerActions, track: (S
                 if (!value.inherited) {
                     ProfileSummaryRow(
                         ComponentsManager.LABEL.getValue(component),
-                        if (ComponentsManager.runtimeManaged(component, a.systemPowerVr)) stringResource(R.string.gpu_system_powervr)
+                        if (ComponentsManager.runtimeManaged(component, a.systemPowerVr)) stringResource(a.systemDriverLabel)
                         else profileValueLabel(value),
                     )
                 }
@@ -1146,7 +1147,7 @@ private fun ComponentsDrawerPage(host: MenuHost, a: DrawerActions, track: (Strin
                     options = options,
                     selected = gameProfile.componentFiles[comp],
                     enabled = !managedDxvk || gameProfile.componentFiles[comp] != null,
-                    valueLabel = if (managedDxvk) stringResource(R.string.gpu_system_powervr) else null,
+                    valueLabel = if (managedDxvk) stringResource(a.systemDriverLabel) else null,
                     chipModifier = track("cmp-$comp"),
                     onPick = { file -> a.onGameComponent(gameProfile.appId, comp, file) },
                 )
@@ -1183,7 +1184,7 @@ private fun ComponentsDrawerPage(host: MenuHost, a: DrawerActions, track: (Strin
                     Row(modifier = Modifier.fillMaxWidth().padding(top = 3.dp)) {
                         Text(ComponentsManager.LABEL.getValue(comp), fontSize = 12.sp, color = colors.onSurfaceVariant, modifier = Modifier.width(96.dp))
                         Text(
-                            if (ComponentsManager.runtimeManaged(comp, a.systemPowerVr)) stringResource(R.string.gpu_system_powervr)
+                            if (ComponentsManager.runtimeManaged(comp, a.systemPowerVr)) stringResource(a.systemDriverLabel)
                             else r.components.getValue(comp).inUse,
                             fontSize = 12.sp, color = colors.onBackground, maxLines = 1, overflow = TextOverflow.Ellipsis,
                         )
@@ -1229,7 +1230,7 @@ private fun ComponentsDrawerPage(host: MenuHost, a: DrawerActions, track: (Strin
                 else st.queued?.let { stringResource(R.string.comp_next_queued, it) } ?: st.inUse.takeIf { it != shown },
                 options, current,
                 enabled = !managedDxvk,
-                valueLabel = if (managedDxvk) stringResource(R.string.gpu_system_powervr) else null,
+                valueLabel = if (managedDxvk) stringResource(a.systemDriverLabel) else null,
                 note = if (view.inUseByGame) stringResource(R.string.comp_waits_long) else stringResource(R.string.comp_applies_long),
                 chipModifier = track("cmp-$comp"),
                 onPick = { v -> if (v != current || st.queued != null) a.onComponentSwap(p.id, comp, v) },

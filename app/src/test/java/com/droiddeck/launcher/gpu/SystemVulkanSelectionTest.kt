@@ -10,6 +10,53 @@ import org.junit.Assert.assertThrows
 import org.junit.Test
 
 class SystemVulkanSelectionTest {
+    @Test fun maliUsesItsHalWithoutPowerVrDrmOrGlOverrides() {
+        val env = mutableListOf<String>()
+        SystemVulkanDriver.addEnvironment(File("/runtime"), "/vendor/lib64/hw/vulkan.mali.so", null, 37, env)
+        assertTrue(env.contains("HYBRIS_VULKAN_HAL=/vendor/lib64/hw/vulkan.mali.so"))
+        assertTrue(env.contains("DROIDDECK_SYSTEM_VULKAN_GPU=mali"))
+        assertTrue(env.contains("DROIDDECK_SYSTEM_VULKAN_RUNTIME=/runtime"))
+        assertFalse(env.any { it.startsWith("DROIDDECK_POWERVR_RUNTIME=") })
+        assertTrue(env.contains("BL_GAMESCOPE_BACKEND=sdl"))
+        assertTrue(env.contains("VK_INSTANCE_LAYERS=VK_LAYER_HYBRIS_compat"))
+        assertFalse(env.any { it.startsWith("BL_POWERVR_") || it.startsWith("BL_STEAM_GL_PRESENT=") })
+        // The outer compositor uses Wayland; the guest helpers scope X11 WSI to clients.
+        assertFalse(env.any { it.startsWith("WSI_X11_FORCE_SHM=") })
+    }
+
+    @Test fun powerVrRetainsItsRenderNodeAndSteamGlProfile() {
+        val env = mutableListOf<String>()
+        SystemVulkanDriver.addEnvironment(File("/runtime"), "/vendor/lib64/hw/vulkan.powervr.so", "/dev/dri/renderD130", 37, env)
+        assertTrue(env.contains("BL_POWERVR_RENDER_NODE=/dev/dri/renderD130"))
+        assertTrue(env.contains("BL_POWERVR_DRM_HANDLES=1"))
+        assertTrue(env.contains("BL_STEAM_GL_PRESENT=1"))
+        assertTrue(env.contains("DROIDDECK_SYSTEM_VULKAN_GPU=powervr"))
+        assertThrows(IllegalStateException::class.java) {
+            SystemVulkanDriver.addEnvironment(File("/runtime"), "/vendor/lib64/hw/vulkan.powervr.so", null, 37, mutableListOf())
+        }
+    }
+
+    @Test fun xclipseRetainsItsLayerPayloadAndDrmProfile() {
+        val env = mutableListOf<String>()
+        SystemVulkanDriver.addEnvironment(File("/runtime"), "/vendor/lib64/hw/vulkan.samsung.so", "/dev/dri/renderD128", 37, env)
+        assertTrue(env.contains("DROIDDECK_SYSTEM_VULKAN_GPU=xclipse"))
+        assertTrue(env.contains("VK_INSTANCE_LAYERS=VK_LAYER_DROIDDECK_xclipse"))
+        assertTrue(env.contains("DROIDDECK_HYBRIS_LAYERS=VK_LAYER_DROIDDECK_xclipse:VK_LAYER_HYBRIS_compat"))
+        assertTrue(env.contains("DROIDDECK_HYBRIS_LAYER_PATH=/usr/local/lib/droiddeck-xclipse"))
+        assertTrue(env.contains("DROIDDECK_HYBRIS_DXVK=dxvk-2.6.2"))
+        assertTrue(env.contains("BL_POWERVR_RENDER_NODE=/dev/dri/renderD128"))
+        assertTrue(env.contains("DROIDDECK_POWERVR_RUNTIME=/runtime"))
+        assertThrows(IllegalStateException::class.java) {
+            SystemVulkanDriver.addEnvironment(File("/runtime"), "/vendor/lib64/hw/vulkan.samsung.so", null, 37, mutableListOf())
+        }
+    }
+
+    @Test fun unknownHalCannotActivateTheSystemProfile() {
+        assertThrows(IllegalStateException::class.java) {
+            SystemVulkanDriver.addEnvironment(File("/runtime"), "/vendor/lib64/hw/vulkan.other.so", null, 37, mutableListOf())
+        }
+    }
+
     @Test fun defaultPowerVrUsesTheSystemBridge() {
         assertTrue(SystemVulkanDriver.usesDefault(true, ""))
         assertTrue(SystemVulkanDriver.usesDefault(true, null))

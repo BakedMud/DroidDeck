@@ -155,9 +155,36 @@ class ComponentsPageProfileTest {
         compose.onNodeWithText(context.getString(R.string.gpu_system_powervr)).assertIsNotEnabled()
     }
 
+    @Test @Config(qualifiers = "w1280dp-h1000dp")
+    fun systemMaliKeepsDxvkSelectableAndShowsTheSelectedGameComponent() {
+        val context = RuntimeEnvironment.getApplication()
+        showDxvk(
+            systemPowerVr = true,
+            runtimeManagedDxvk = false,
+            systemDriverLabel = R.string.gpu_system_mali,
+            gameDxvkOverride = true,
+        )
+        compose.onNodeWithText(context.getString(R.string.gpu_system_mali)).assertExists()
+        compose.onNodeWithText(context.getString(R.string.cmgr_powervr_dxvk_managed)).assertDoesNotExist()
+        compose.onNode(hasText("Stored DXVK") and SemanticsMatcher.expectValue(SemanticsProperties.Role, Role.RadioButton)).assertIsEnabled()
+        compose.onNodeWithText(context.getString(R.string.comp_original, "1.0")).assertIsEnabled()
+        compose.onAllNodesWithText(context.getString(R.string.gpu_system_powervr), substring = true).assertCountEquals(0)
+
+        compose.onNodeWithText(context.getString(R.string.comp_scope_general)).performClick()
+        compose.onNodeWithText("Game A").performClick()
+        compose.waitUntil(5_000) {
+            compose.onAllNodesWithText(context.getString(R.string.comp_game_reset)).fetchSemanticsNodes().isNotEmpty()
+        }
+        compose.onNodeWithText("Stored DXVK").assertIsEnabled()
+        compose.onNodeWithText(context.getString(R.string.cmgr_powervr_dxvk_managed)).assertDoesNotExist()
+        compose.onAllNodesWithText(context.getString(R.string.gpu_system_powervr), substring = true).assertCountEquals(0)
+    }
+
     private fun showDxvk(
         systemPowerVr: Boolean,
         gameDxvkOverride: Boolean = false,
+        systemDriverLabel: Int = R.string.gpu_system_powervr,
+        runtimeManagedDxvk: Boolean = systemPowerVr,
         onCancel: () -> Unit = {},
         onImport: () -> Unit = {},
         onSwap: (String) -> Unit = {},
@@ -202,7 +229,8 @@ class ComponentsPageProfileTest {
                     onRefresh = {},
                     onImport = onImport,
                     onBack = {},
-                    gpu = GpuDriversState(powerVr = true, systemPowerVr = systemPowerVr),
+                    gpu = GpuDriversState(systemGpu = true, systemPowerVr = systemPowerVr,
+                        systemDriverLabel = systemDriverLabel, runtimeManagedDxvk = runtimeManagedDxvk),
                     games = listOf(Library.SteamGame(42, "Game A", null, "internal")),
                     requestInitialFocus = false,
                 )

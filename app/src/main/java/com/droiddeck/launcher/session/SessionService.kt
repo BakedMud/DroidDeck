@@ -319,7 +319,7 @@ class SessionService : Service() {
     // ── The session ─────────────────────────────────────────────────────────────────────────
 
     private fun runSession(gen: Int) {
-        SessionPrefs.ensurePowerVrAutoDrivers(this)
+        SessionPrefs.ensureSystemVulkanAutoDrivers(this)
         SessionTerminal.clear()
         try {
             LinuxRuntime.writeAccounts(this)

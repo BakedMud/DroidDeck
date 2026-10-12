@@ -7,7 +7,7 @@ import com.droiddeck.launcher.gpu.SystemVulkanDriver
 import java.io.File
 
 /** Whether this device has a graphics backend the runtime can use. Adreno uses Turnip;
- * PowerVR uses its vendor Vulkan driver through the bundled runtime bridge. Other GPU families
+ * PowerVR and Mali use their vendor Vulkan drivers through the bundled runtime bridge. Other GPU families
  * still need a supported backend before a session can display frames. */
 object DeviceSupport {
     fun adreno(): Boolean =
@@ -15,7 +15,7 @@ object DeviceSupport {
 
     fun graphicsAvailable(): Boolean = graphicsAvailable(adreno(), SystemVulkanDriver.isAvailable())
 
-    internal fun graphicsAvailable(adreno: Boolean, powerVrReady: Boolean): Boolean = adreno || powerVrReady
+    internal fun graphicsAvailable(adreno: Boolean, systemVulkanReady: Boolean): Boolean = adreno || systemVulkanReady
 
     /** The chip as the device names it, for the card that explains the refusal. */
     fun gpuName(context: Context): String {

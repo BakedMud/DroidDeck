@@ -60,6 +60,23 @@ class DriverPairsTest {
     }
 
     @Test
+    fun maliRemainsExperimentalAndNeverRecommendsAdrenoPairs() {
+        assertEquals(Family.MALI, GpuInfo.familyOf(false, 0, mali = true))
+        assertEquals(Family.A7XX, GpuInfo.familyOf(true, 740, mali = true))
+        val mali = GpuInfo("Mali-G715", 0, Family.MALI, "", false)
+        assertEquals(GpuInfo.Support.UNTESTED, mali.support)
+        assertTrue(mali.supportText.contains("Experimental system Mali"))
+        assertNull(DriverPairs.recommendedKey(mali, emptyList()))
+        val pairs = DriverPairs.from(TurnipReleases.Check(
+            listOf(asset("Turnip-r4.zip", "r4", false, DriverPairs.BANNER),
+                asset("Turnip-r4-Linux.zip", "r4", true, DriverPairs.BANNER)),
+            emptyList(), emptyList(), 0L,
+        ))
+        assertFalse(pairs.single().suits(mali))
+        assertNull(DriverPairs.recommendedKey(mali, pairs))
+    }
+
+    @Test
     fun autoPicksWinNativeBalancedOn8xxAndBannersElsewhere() {
         assertEquals(DriverPairs.WN_BALANCED, DriverPairs.recommendedKey(gpu(830), emptyList()))
         assertEquals("840 with no DD-Turnip release listed", DriverPairs.WN_BALANCED, DriverPairs.recommendedKey(gpu(840), emptyList()))

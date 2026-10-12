@@ -104,14 +104,94 @@ class SystemGraphicsLaunchTest(unittest.TestCase):
                              "VK_LAYER_window_system_integration:VK_LAYER_DROIDDECK_xclipse:VK_LAYER_HYBRIS_compat")
             self.assertEqual(result["VK_LAYER_PATH"], f"{runtime}/wsi:{runtime}/lib:/usr/local/lib/droiddeck-xclipse")
             self.assertEqual(result["DROIDDECK_HYBRIS_DXVK"], "dxvk-2.6.2")
+            generic = dict(env, DROIDDECK_SYSTEM_VULKAN_RUNTIME=str(runtime),
+                           DROIDDECK_SYSTEM_VULKAN_GPU="xclipse",
+                           DROIDDECK_POWERVR_RUNTIME="/old-alias-must-not-be-used")
+            generic_launch, generic_result = MODULE["system_graphics_launch"](command, generic)
+            self.assertEqual(generic_launch, launch)
+            for key in ("VK_INSTANCE_LAYERS", "VK_LAYER_PATH", "DROIDDECK_HYBRIS_DXVK", "HYBRIS_BC_TEXTURES"):
+                self.assertEqual(generic_result[key], result[key])
             for name in ("../dxvk", "other", "dxvk/x"):
                 with self.subTest(name=name), self.assertRaises(MODULE["SystemGraphicsError"]):
                     MODULE["system_graphics_launch"](command, dict(env, DROIDDECK_HYBRIS_DXVK=name))
 
+    def test_generic_runtime_supports_mali_without_changing_powervr_presentation(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            runtime, _ = self.runtime(Path(tmp))
+            command = ["/selected/proton", "waitforexitandrun", "game with spaces.exe"]
+            for gpu in ("mali", "powervr"):
+                with self.subTest(gpu=gpu):
+                    env = {"DROIDDECK_SYSTEM_VULKAN_RUNTIME": str(runtime), "DROIDDECK_SYSTEM_VULKAN_GPU": gpu,
+                           "DROIDDECK_POWERVR_RUNTIME": "/old-alias-must-not-be-used",
+                           "STEAM_COMPAT_DATA_PATH": "/compatdata/42", "WSI_X11_FORCE_SHM": "0",
+                           "FEX_TSOENABLED": "1", "WINESERVER": "/selected/wineserver",
+                           "CUSTOM": "literal $value", "HYBRIS_VULKAN_HAL": "/vendor/lib64/hw/vulkan.so",
+                           "HYBRIS_BC_TEXTURES": "custom", "PROTON_USE_WINED3D": "1"}
+                    saved = dict(env)
+                    launch, result = MODULE["system_graphics_launch"](command, env)
+                    self.assertEqual(launch, command if gpu == "mali" else [str(runtime / "run-proton.py"), *command])
+                    self.assertEqual(result["VK_LAYER_PATH"], f"{runtime}/wsi:{runtime}/lib")
+                    self.assertEqual(result["VK_INSTANCE_LAYERS"],
+                                     "VK_LAYER_window_system_integration:VK_LAYER_HYBRIS_compat")
+                    self.assertEqual(result["WSI_X11_FORCE_SHM"], "1" if gpu == "mali" else "0")
+                    self.assertEqual(result["HYBRIS_BC_TEXTURES"], "custom" if gpu == "mali" else "dxvk")
+                    self.assertEqual(result.get("PROTON_USE_WINED3D"), "1" if gpu == "mali" else None)
+                    self.assertEqual(result["ENABLE_GAMESCOPE_WSI"], "0")
+                    for key in ("FEX_TSOENABLED", "WINESERVER", "CUSTOM", "HYBRIS_VULKAN_HAL"):
+                        self.assertEqual(result[key], env[key])
+                    self.assertEqual(env, saved)
+
+    def test_mali_profile_keeps_legacy_runtime_and_leaves_proton_probes_unchanged(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            runtime, _ = self.runtime(Path(tmp))
+            env = {"DROIDDECK_POWERVR_RUNTIME": str(runtime), "DROIDDECK_SYSTEM_VULKAN_GPU": "mali",
+                   "STEAM_COMPAT_DATA_PATH": "/compatdata/42"}
+            command = ["/proton", "waitforexitandrun", "game.exe"]
+            launch, result = MODULE["system_graphics_launch"](command, env)
+            self.assertIs(launch, command)
+            self.assertEqual(result["WSI_X11_FORCE_SHM"], "1")
+            env["DROIDDECK_SYSTEM_VULKAN_RUNTIME"] = "/not-installed"
+            for args, probe in ((["/proton", "run", "vulkantest.exe"], env),
+                                (["/proton", "getcompatpath", "x"], env),
+                                (command, dict(env, STEAM_COMPAT_DATA_PATH="/compatdata/0"))):
+                with self.subTest(args=args, prefix=probe["STEAM_COMPAT_DATA_PATH"]):
+                    actual, inherited = MODULE["system_graphics_launch"](args, probe)
+                    self.assertIs(actual, args)
+                    self.assertIs(inherited, probe)
+
+    def test_mali_needs_only_presentation_files_and_keeps_selected_game_components(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            runtime, files = self.runtime(Path(tmp))
+            required = [name for name in files if name.startswith(("wsi/", "lib/"))]
+            for name in files:
+                if name not in required:
+                    (runtime / name).unlink()
+            env = {"DROIDDECK_SYSTEM_VULKAN_RUNTIME": str(runtime), "DROIDDECK_SYSTEM_VULKAN_GPU": "mali",
+                   "STEAM_COMPAT_DATA_PATH": "/compatdata/42", "WINEDLLOVERRIDES": "dxgi=n;custom=n",
+                   "WINESERVER": "/selected/wineserver", "PROTON_USE_WINED3D": "1"}
+            command = ["/custom/proton", "waitforexitandrun", "game.exe"]
+            actual, result = MODULE["system_graphics_launch"](command, env)
+            self.assertIs(actual, command)
+            for key in ("WINEDLLOVERRIDES", "WINESERVER", "PROTON_USE_WINED3D"):
+                self.assertEqual(result[key], env[key])
+            self.assertNotIn("HYBRIS_BC_TEXTURES", result)
+            self.assertEqual(result["WSI_X11_FORCE_SHM"], "1")
+            for name in required:
+                with self.subTest(missing=name):
+                    target = runtime / name
+                    original = target.read_bytes()
+                    target.unlink()
+                    with patch.object(os, "execvpe") as execute:
+                        with self.assertRaises(MODULE["SystemGraphicsError"]):
+                            MODULE["exec_proton"](command, env)
+                        execute.assert_not_called()
+                    target.write_bytes(original)
+
     def test_incomplete_runtime_fails_before_any_proton_exec(self):
         with tempfile.TemporaryDirectory() as tmp:
             runtime, files = self.runtime(Path(tmp))
-            env = {"DROIDDECK_POWERVR_RUNTIME": str(runtime), "STEAM_COMPAT_DATA_PATH": "/compatdata/42"}
+            env = {"DROIDDECK_SYSTEM_VULKAN_RUNTIME": str(runtime), "DROIDDECK_SYSTEM_VULKAN_GPU": "powervr",
+                   "STEAM_COMPAT_DATA_PATH": "/compatdata/42"}
             command = ["/proton", "waitforexitandrun", "game.exe"]
             for name in files:
                 target = runtime / name
@@ -130,7 +210,7 @@ class SystemGraphicsLaunchTest(unittest.TestCase):
             with self.assertRaises(MODULE["SystemGraphicsError"]):
                 MODULE["system_graphics_launch"](command, env)
             with self.assertRaises(MODULE["SystemGraphicsError"]):
-                MODULE["system_graphics_launch"](command, dict(env, DROIDDECK_POWERVR_RUNTIME="relative"))
+                MODULE["system_graphics_launch"](command, dict(env, DROIDDECK_SYSTEM_VULKAN_RUNTIME="relative"))
 
     def test_wrapper_receives_the_sync_selected_proton(self):
         with tempfile.TemporaryDirectory() as tmp:
@@ -219,7 +299,7 @@ class GameEnvironmentTest(unittest.TestCase):
             subprocess.run(["bash", "-c", script, "test", str(base)], env=env, check=True)
             self.assertEqual(target.read_text(), "general")
 
-    def test_system_powervr_preserves_dxvk_profiles_without_applying_them(self):
+    def test_system_vulkan_preserves_dxvk_profiles_without_applying_them(self):
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)
             home = root / "home"
@@ -250,23 +330,30 @@ class GameEnvironmentTest(unittest.TestCase):
             selection.write_text("".join(rows))
             saved = selection.read_bytes()
             script = COMPAT["BL_COMPONENTS_SETUP"] + '\nverb=waitforexitandrun; bl_components "$1"\n'
-            env = dict(os.environ, HOME=str(home), STEAM_COMPAT_DATA_PATH="/steam/compatdata/42",
-                       DROIDDECK_POWERVR_RUNTIME="/system_vulkan/runtime")
+            env = dict(os.environ, HOME=str(home), STEAM_COMPAT_DATA_PATH="/steam/compatdata/42")
+            for key in ("DROIDDECK_SYSTEM_VULKAN_RUNTIME", "DROIDDECK_POWERVR_RUNTIME"):
+                env.pop(key, None)
+            for key in ("DROIDDECK_SYSTEM_VULKAN_RUNTIME", "DROIDDECK_POWERVR_RUNTIME"):
+                with self.subTest(runtime_key=key):
+                    selected = dict(env, **{key: "/system_vulkan/runtime"})
+                    subprocess.run(["bash", "-c", script, "test", str(base)], env=selected, check=True)
 
-            subprocess.run(["bash", "-c", script, "test", str(base)], env=env, check=True)
+                    self.assertEqual((base / paths["dxvk"]).read_text(), "bundled dxvk")
+                    self.assertEqual(leftover.read_text(), "bundled d3d8")
+                    for comp in ("fex", "vkd3d"):
+                        self.assertEqual((base / paths[comp]).read_text(), comp + "-game")
+                    self.assertEqual(selection.read_bytes(), saved)
 
-            self.assertEqual((base / paths["dxvk"]).read_text(), "bundled dxvk")
-            self.assertEqual(leftover.read_text(), "bundled d3d8")
-            for comp in ("fex", "vkd3d"):
-                self.assertEqual((base / paths[comp]).read_text(), comp + "-game")
-            self.assertEqual(selection.read_bytes(), saved)
-
-            # A subsequent manual-driver session still applies the saved per-game DXVK choice.
-            env.pop("DROIDDECK_POWERVR_RUNTIME")
-            subprocess.run(["bash", "-c", script, "test", str(base)], env=env, check=True)
-            self.assertEqual((base / paths["dxvk"]).read_text(), "dxvk-game")
-            self.assertFalse(leftover.exists())
-            self.assertEqual(selection.read_bytes(), saved)
+            # Mali and subsequent manual-driver sessions both apply the saved per-game DXVK choice.
+            for profile in (dict(env, DROIDDECK_SYSTEM_VULKAN_RUNTIME="/system_vulkan/runtime",
+                                 DROIDDECK_SYSTEM_VULKAN_GPU="mali"), env):
+                with self.subTest(gpu=profile.get("DROIDDECK_SYSTEM_VULKAN_GPU", "manual")):
+                    (base / paths["dxvk"]).write_text("bundled dxvk")
+                    leftover.write_text("bundled d3d8")
+                    subprocess.run(["bash", "-c", script, "test", str(base)], env=profile, check=True)
+                    self.assertEqual((base / paths["dxvk"]).read_text(), "dxvk-game")
+                    self.assertFalse(leftover.exists())
+                    self.assertEqual(selection.read_bytes(), saved)
 
     def test_component_scope_matches_environment_scope_for_shortcut_ids(self):
         with tempfile.TemporaryDirectory() as tmp:

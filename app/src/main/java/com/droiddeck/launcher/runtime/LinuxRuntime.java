@@ -201,7 +201,7 @@ public final class LinuxRuntime {
         bind(cmd, "/dev");
         bind(cmd, "/proc");
         bind(cmd, "/sys");
-        if (com.droiddeck.launcher.gpu.SystemVulkanDriver.isPowerVr()) {
+        if (SystemVulkanDriver.isSupportedGpu()) {
             // The glibc bridge loads the device's existing Android HAL and its dependencies.
             // These read-only Android partitions remain subject to the app's normal permissions.
             for (String path : new String[]{"/system", "/vendor", "/apex", "/system_ext", "/product", "/odm"})
@@ -287,7 +287,7 @@ public final class LinuxRuntime {
         }
         if (com.droiddeck.launcher.gpu.SystemVulkanDriver.isPowerVr()) {
             bindPowerVrGpuNode(context, cmd);
-        } else {
+        } else if (!SystemVulkanDriver.isMali()) {
             bindGpuNode(context, cmd);
         }
         bindAdrenoStats(cmd, extraBinds);
@@ -301,7 +301,7 @@ public final class LinuxRuntime {
     }
 
     /**
-     * Tensor's render node is accessible directly, but Android denies listing its parent
+     * The PowerVR render node may be accessible directly, but Android denies listing its parent
      * directory. libdrm enumerates that directory even when given the device number. Expose
      * the real node through a listable private directory; retain its real sysfs identity.
      */
