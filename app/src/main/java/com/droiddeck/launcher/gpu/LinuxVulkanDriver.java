@@ -22,7 +22,7 @@ import java.util.function.Supplier;
  *
  * <p>"" (the default) means the driver the runtime was built with, at
  * {@code usr/lib/libvulkan_freedreno.so} on Adreno, or the bundled bridge to the system
- * PowerVR or Mali driver.
+ * Vulkan driver.
  * Otherwise the value is an imported driver's id ({@link LinuxVulkanDriverManager}), and the
  * session is handed that driver's ICD manifest in {@code BL_VK_DRIVER}: the session script points
  * the Vulkan loader at it with {@code VK_DRIVER_FILES} after checking both the manifest and the
@@ -57,7 +57,7 @@ public final class LinuxVulkanDriver {
      */
     public static String optionLabel(Context context, String value) {
         if (value == null || value.isEmpty()) return SystemVulkanDriver.isSupportedGpu()
-                ? context.getString(SystemVulkanDriver.isMali() ? R.string.gpu_system_mali : R.string.gpu_system_powervr) : "Runtime default (built into the runtime)";
+                ? context.getString(R.string.gpu_system_driver, SystemVulkanDriver.gpuName()) : "Runtime default (built into the runtime)";
         LinuxVulkanDriverManager m = new LinuxVulkanDriverManager(context);
         if (!m.isInstalled(value)) return value + (SystemVulkanDriver.isSupportedGpu()
                 ? " (imported, missing)" : " (imported, missing - uses the runtime default)");

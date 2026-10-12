@@ -36,8 +36,17 @@ data class GpuInfo(
         /** An Adreno whose model KGSL does not give: treated as the newest family it could be. */
         ADRENO_UNKNOWN("Adreno"),
         POWERVR("PowerVR"),
+        XCLIPSE("Xclipse"),
         MALI("Mali"),
         NOT_ADRENO("Not an Adreno GPU");
+
+        val systemProfile: SystemVulkanDriver.Profile?
+            get() = when (this) {
+                POWERVR -> SystemVulkanDriver.Profile.POWERVR
+                XCLIPSE -> SystemVulkanDriver.Profile.XCLIPSE
+                MALI -> SystemVulkanDriver.Profile.MALI
+                else -> null
+            }
 
         /** [label] in the app's language: the Adreno families are names, the rest is words. */
         fun label(context: Context): String = if (this == NOT_ADRENO) context.getString(R.string.gpuinfo_not_adreno) else label
@@ -59,8 +68,8 @@ data class GpuInfo(
         get() = when (support) {
             Support.TESTED -> "Supported"
             Support.UNTESTED -> when (family) {
-                Family.POWERVR -> "System PowerVR driver: compatibility varies by device"
-                Family.MALI -> "Experimental system Mali driver: compatibility varies by device"
+                Family.POWERVR -> "System ${family.systemProfile!!.gpuName} driver: compatibility varies by device"
+                Family.XCLIPSE, Family.MALI -> "Experimental system ${family.systemProfile!!.gpuName} driver: compatibility varies by device"
                 Family.A7XX_LOW -> "Experimental: its drivers are test builds"
                 else -> "Outside tested hardware (Adreno 650, 725 and newer): it may not run"
             }
@@ -71,13 +80,13 @@ data class GpuInfo(
     fun supportText(context: Context): String = context.getString(when (support) {
         Support.TESTED -> R.string.gpuinfo_supported
         Support.UNTESTED -> when (family) {
-            Family.POWERVR -> R.string.gpuinfo_powervr
-            Family.MALI -> R.string.gpuinfo_mali
+            Family.POWERVR -> R.string.gpuinfo_system_driver
+            Family.XCLIPSE, Family.MALI -> R.string.gpuinfo_system_experimental
             Family.A7XX_LOW -> R.string.gpuinfo_experimental
             else -> R.string.gpuinfo_below_tested
         }
         Support.UNSUPPORTED -> R.string.gpuinfo_unsupported
-    })
+    }, family.systemProfile?.gpuName.orEmpty())
 
     /** [name] for the screen: the stand-in for a GPU the device does not name is in the app's language. */
     fun displayName(context: Context): String = if (name == UNNAMED) context.getString(R.string.gpu_this_gpu) else name
@@ -105,14 +114,13 @@ data class GpuInfo(
                 fromPlatform > 0 -> "platform"
                 else -> ""
             }
-            val family = familyOf(adreno, model, SystemVulkanDriver.isPowerVr(), SystemVulkanDriver.isMali())
+            val family = familyOf(adreno, model, SystemVulkanDriver.profile())
+            val systemGpuName = family.systemProfile?.gpuName
             val samsung = Build.MANUFACTURER.equals("samsung", ignoreCase = true)
             return GpuInfo(
                 name = when {
-                    family == Family.POWERVR -> SystemVulkanDriver.gpuName().let { gpu ->
-                        VulkanInfo.cachedOrNull()?.get("device")?.takeIf { it.contains(gpu, ignoreCase = true) } ?: gpu
-                    }
-                    family == Family.MALI -> VulkanInfo.cachedOrNull()?.get("device")?.takeIf { it.contains("Mali", ignoreCase = true) } ?: "Mali"
+                    systemGpuName != null -> VulkanInfo.cachedOrNull()?.get("device")
+                        ?.takeIf { it.contains(systemGpuName, ignoreCase = true) } ?: systemGpuName
                     !adreno -> Build.HARDWARE.ifBlank { UNNAMED }
                     model > 0 -> "Adreno $model"
                     else -> "Adreno"
@@ -141,9 +149,12 @@ data class GpuInfo(
             ""
         }
 
-        internal fun familyOf(adreno: Boolean, model: Int, powerVr: Boolean = false, mali: Boolean = false): Family = when {
-            !adreno && powerVr -> Family.POWERVR
-            !adreno && mali -> Family.MALI
+        internal fun familyOf(adreno: Boolean, model: Int, systemProfile: SystemVulkanDriver.Profile? = null): Family = when {
+            !adreno && systemProfile != null -> when (systemProfile) {
+                SystemVulkanDriver.Profile.POWERVR -> Family.POWERVR
+                SystemVulkanDriver.Profile.XCLIPSE -> Family.XCLIPSE
+                SystemVulkanDriver.Profile.MALI -> Family.MALI
+            }
             !adreno -> Family.NOT_ADRENO
             model == 0 -> Family.ADRENO_UNKNOWN
             model >= 800 -> Family.A8XX

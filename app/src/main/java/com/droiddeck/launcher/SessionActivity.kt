@@ -566,9 +566,8 @@ class SessionActivity : ComponentActivity(), SurfaceHolder.Callback {
                 )
                 SessionDrawer(drawerOpen, drawerPage, drawerControllerActive, onPageChange = { drawerPage = it }, a = DrawerActions(
                     steam = SessionState.mode == SessionService.MODE_STEAM,
-                    systemDriverLabel = if (com.droiddeck.launcher.gpu.SystemVulkanDriver.isMali())
-                        R.string.gpu_system_mali else R.string.gpu_system_powervr,
-                    systemPowerVr = com.droiddeck.launcher.gpu.SystemVulkanDriver.managesDxvk(
+                    systemDriverName = com.droiddeck.launcher.gpu.SystemVulkanDriver.gpuName(),
+                    runtimeManagedDxvk = com.droiddeck.launcher.gpu.SystemVulkanDriver.managesDxvk(
                         SessionPrefs.linuxDriver(this@SessionActivity)),
                     title = if (SessionState.mode == SessionService.MODE_RUN)
                         com.droiddeck.launcher.frontend.Library.nameForProgram(SessionState.program) ?: getString(R.string.session_title_game) else null,
@@ -1212,7 +1211,7 @@ class SessionActivity : ComponentActivity(), SurfaceHolder.Callback {
         // the evdev codes we inject.
         FileUtils.copyAsset(this, "wayland/keymap.xkb", File(runtimeDir, "keymap.xkb"))
 
-        // Adreno imports dma-bufs with Turnip. PowerVR and Mali use their system Vulkan drivers
+        // Adreno imports dma-bufs with Turnip. Other supported GPUs use their system Vulkan drivers
         // to import the Android hardware buffers supplied by the runtime bridge.
         val turnip = TurnipDriver(this)
         val driverId = if (CompositorHost.isStarted) null else turnip.install()

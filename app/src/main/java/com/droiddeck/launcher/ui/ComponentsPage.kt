@@ -502,10 +502,10 @@ fun ComponentsPage(
                 val active = gpu.activePair
                 InUseBar(
                     queued = gpu.busy != null,
-                    sentence = (active?.let { "${it.name} ${it.version}" } ?: gpu.activeBundle ?: stringResource(if (gpu.systemPowerVr) gpu.systemDriverLabel else R.string.gpu_builtin))
+                    sentence = (active?.let { "${it.name} ${it.version}" } ?: gpu.activeBundle ?: if (gpu.systemVulkan) stringResource(R.string.gpu_system_driver, gpu.systemDriverName) else stringResource(R.string.gpu_builtin))
                         .let { if (gpu.auto) stringResource(R.string.gpu_bar_auto, it) else it },
                     note = if (gpu.busy != null) (if (gpu.percent >= 0) "${gpu.percent}%" else "…")
-                        else if (gpu.systemPowerVr) stringResource(R.string.gpu_auto_system_hint)
+                        else if (gpu.systemVulkan) stringResource(R.string.gpu_auto_system_hint)
                         else gpu.autoStatus.ifEmpty { if (active != null || gpu.activeBundle != null) "" else gpu.pairs.firstOrNull { it.recommended }?.let { stringResource(R.string.gpu_recommended_for, it.name) } ?: stringResource(R.string.gpu_refresh_hint) },
                 )
             }
@@ -524,7 +524,7 @@ fun ComponentsPage(
                     Column {
                         InUseBar(
                             queued = st.queued != null,
-                            sentence = (if (managedDxvk) stringResource(R.string.comp_in_use, label, stringResource(gpu.systemDriverLabel)) +
+                            sentence = (if (managedDxvk) stringResource(R.string.comp_in_use, label, stringResource(R.string.gpu_system_driver, gpu.systemDriverName)) +
                                 (st.queued?.let { "\n" + stringResource(R.string.cmgr_powervr_dxvk_queued, it) } ?: "")
                                 else if (st.queued != null) stringResource(R.string.comp_next_queued, st.queued) else stringResource(R.string.comp_in_use, label, st.inUse))
                                 .let { if (reappliedAt != null && !managedDxvk) stringResource(R.string.comp_reapplied, it, reappliedAt) else it },
@@ -533,7 +533,7 @@ fun ComponentsPage(
                             maxLines = if (managedDxvk && st.queued != null) 3 else 2,
                         )
                         if (managedDxvk) Text(
-                            stringResource(R.string.cmgr_powervr_dxvk_managed),
+                            stringResource(R.string.cmgr_system_dxvk_managed, gpu.systemDriverName),
                             fontSize = 13.sp, color = colors.onSurfaceVariant, modifier = Modifier.padding(top = 8.dp),
                         )
                     }
@@ -885,7 +885,7 @@ fun ComponentsPage(
                     packages = snapshot?.packages.orEmpty(),
                     componentChoices = gameComponents,
                     runtimeManagedDxvk = gpu.runtimeManagedDxvk,
-                    systemDriverLabel = gpu.systemDriverLabel,
+                    systemDriverName = gpu.systemDriverName,
                     componentMenu = gameComponentMenu,
                     protonMenu = gameProtonMenu,
                     fexMenu = fexMenu,
@@ -1080,9 +1080,9 @@ private fun Stack(
         LayerCard(
             title = LayerTitle(l),
             value = when (l) {
-                GPU_TAB -> if (gpu.systemPowerVr) stringResource(gpu.systemDriverLabel) else if (gpu.auto) auto else gpu.activePair?.name ?: gpu.activeBundle ?: auto
+                GPU_TAB -> if (gpu.systemVulkan) stringResource(R.string.gpu_system_driver, gpu.systemDriverName) else if (gpu.auto) auto else gpu.activePair?.name ?: gpu.activeBundle ?: auto
                 PROTON_TAB -> (view?.proton?.name ?: "") + " ▾"
-                else -> if (ComponentsManager.runtimeManaged(l, gpu.runtimeManagedDxvk)) stringResource(gpu.systemDriverLabel)
+                else -> if (ComponentsManager.runtimeManaged(l, gpu.runtimeManagedDxvk)) stringResource(R.string.gpu_system_driver, gpu.systemDriverName)
                     else st?.let { if (it.activeFile == null) original else it.inUse } ?: ""
             },
             swapped = l in ComponentsManager.COMPONENTS && st?.activeFile != null && !ComponentsManager.runtimeManaged(l, gpu.runtimeManagedDxvk),
@@ -1199,7 +1199,7 @@ private fun GameComponentOverrides(
     packages: List<ComponentsManager.Package>,
     componentChoices: Map<String, String>,
     runtimeManagedDxvk: Boolean,
-    systemDriverLabel: Int,
+    systemDriverName: String,
     componentMenu: String?,
     protonMenu: Boolean,
     fexMenu: Boolean,
@@ -1292,7 +1292,7 @@ private fun GameComponentOverrides(
             GamePackageRow(
                 comp = "dxvk",
                 runtimeManaged = ComponentsManager.runtimeManaged("dxvk", runtimeManagedDxvk),
-                systemDriverLabel = systemDriverLabel,
+                systemDriverName = systemDriverName,
                 packages = packages,
                 selectedFile = componentChoices["dxvk"],
                 open = componentMenu == "dxvk",
@@ -1358,7 +1358,7 @@ private fun GamePackageRow(
     onPick: (String, String?) -> Unit,
     onRuntimeOptions: (() -> Unit)? = null,
     runtimeManaged: Boolean = false,
-    systemDriverLabel: Int = R.string.gpu_system_powervr,
+    systemDriverName: String = "",
 ) {
     val choices = packages.filter { it.comp == comp }
     val selected = choices.firstOrNull { it.file == selectedFile }
@@ -1366,7 +1366,7 @@ private fun GamePackageRow(
     val enabled = !busy && (!runtimeManaged || selectedFile != null)
     SettingsRow(
         title,
-        if (runtimeManaged) stringResource(R.string.cmgr_powervr_dxvk_managed)
+        if (runtimeManaged) stringResource(R.string.cmgr_system_dxvk_managed, systemDriverName)
         else if (selected == null) {
             if (proton == null) stringResource(R.string.comp_game_component_general)
             else stringResource(R.string.comp_game_component_runtime, proton.name)
@@ -1375,7 +1375,7 @@ private fun GamePackageRow(
         Row(horizontalArrangement = Arrangement.spacedBy(8.dp), verticalAlignment = Alignment.CenterVertically) {
             Box {
                 ValueChip(
-                    if (runtimeManaged) stringResource(systemDriverLabel) else selected?.version ?: stringResource(R.string.comp_game_use_general),
+                    if (runtimeManaged) stringResource(R.string.gpu_system_driver, systemDriverName) else selected?.version ?: stringResource(R.string.comp_game_use_general),
                     open && enabled,
                     enabled = enabled,
                     modifier = Modifier.widthIn(max = 240.dp),

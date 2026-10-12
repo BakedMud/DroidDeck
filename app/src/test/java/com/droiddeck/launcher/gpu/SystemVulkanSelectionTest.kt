@@ -10,6 +10,39 @@ import org.junit.Assert.assertThrows
 import org.junit.Test
 
 class SystemVulkanSelectionTest {
+    @Test fun halProfilesRequireAnUnambiguousKnownHal() {
+        for (profile in SystemVulkanDriver.Profile.values()) {
+            assertEquals(profile, SystemVulkanDriver.Profile.fromHal(profile.halPath))
+            assertEquals(profile, SystemVulkanDriver.findProfile { it == profile.halPath })
+        }
+        assertNull(SystemVulkanDriver.Profile.fromHal(null))
+        assertNull(SystemVulkanDriver.Profile.fromHal("/vendor/lib64/hw/vulkan.other.so"))
+        assertNull(SystemVulkanDriver.findProfile { false })
+        assertNull(SystemVulkanDriver.findProfile { true })
+    }
+
+    @Test fun drmIdentityCannotCrossVendorProfiles() {
+        assertFalse(SystemVulkanDriver.renderNodeDriver(SystemVulkanDriver.Profile.POWERVR, "sgpu"))
+        assertFalse(SystemVulkanDriver.renderNodeDriver(SystemVulkanDriver.Profile.XCLIPSE, "pvr"))
+        assertFalse(SystemVulkanDriver.renderNodeDriver(SystemVulkanDriver.Profile.MALI, "pvr"))
+        assertFalse(SystemVulkanDriver.renderNodeDriver(null, "pvr"))
+        assertFalse(SystemVulkanDriver.renderNodeDriver(SystemVulkanDriver.Profile.POWERVR, null))
+    }
+
+    @Test fun profileCapabilitiesMatchSessionAndComponentPolicy() {
+        for (profile in SystemVulkanDriver.Profile.values()) {
+            val env = mutableListOf<String>()
+            SystemVulkanDriver.addEnvironment(File("/runtime"), profile.halPath,
+                if (profile.requiresRenderNode) "/dev/dri/renderD128" else null, 37, env)
+            assertTrue(env.contains("DROIDDECK_SYSTEM_VULKAN_PRESENTATION=" + profile.presentation))
+            val dxvk = if (profile.dxvkPayload == null) "user" else "managed"
+            assertTrue(env.contains("DROIDDECK_SYSTEM_VULKAN_DXVK=$dxvk"))
+            assertTrue(env.contains("DROIDDECK_HYBRIS_SESSION_LAYERS=" + profile.sessionLayers))
+            if (profile.dxvkPayload == null) assertFalse(env.any { it.startsWith("DROIDDECK_HYBRIS_DXVK=") })
+            else assertTrue(env.contains("DROIDDECK_HYBRIS_DXVK=" + profile.dxvkPayload))
+        }
+    }
+
     @Test fun maliUsesItsHalWithoutPowerVrDrmOrGlOverrides() {
         val env = mutableListOf<String>()
         SystemVulkanDriver.addEnvironment(File("/runtime"), "/vendor/lib64/hw/vulkan.mali.so", null, 37, env)
@@ -77,37 +110,37 @@ class SystemVulkanSelectionTest {
 
     @Test fun renderNodeDriverMustIdentifyPowerVrExactly() {
         for (name in listOf("pvrsrvkm", "pvr", "powervr"))
-            assertTrue(name, SystemVulkanDriver.powerVrDriver(name))
+            assertTrue(name, SystemVulkanDriver.renderNodeDriver(SystemVulkanDriver.Profile.POWERVR, name))
         for (name in listOf(null, "", "msm", "panfrost", "not-pvr"))
-            assertFalse(name, SystemVulkanDriver.powerVrDriver(name))
+            assertFalse(name, SystemVulkanDriver.renderNodeDriver(SystemVulkanDriver.Profile.POWERVR, name))
     }
 
     @Test fun samsungXclipseGpuNodeIsSelectedOverItsDisplayNode() {
-        assertTrue(SystemVulkanDriver.powerVrDriver("sgpu"))
-        assertFalse("the display controller is not the GPU", SystemVulkanDriver.powerVrDriver("exynos-drm"))
+        assertTrue(SystemVulkanDriver.renderNodeDriver(SystemVulkanDriver.Profile.XCLIPSE, "sgpu"))
+        assertFalse("the display controller is not the GPU", SystemVulkanDriver.renderNodeDriver(SystemVulkanDriver.Profile.XCLIPSE, "exynos-drm"))
         // Galaxy A56 (Exynos 1580): the GPU owns renderD128, the display controller renderD129.
         val drivers = mapOf("/dev/dri/renderD128" to "sgpu", "/dev/dri/renderD129" to "exynos-drm")
         assertEquals("/dev/dri/renderD128", SystemVulkanDriver.findRenderNode(null) { path ->
-            SystemVulkanDriver.powerVrDriver(drivers[path])
+            SystemVulkanDriver.renderNodeDriver(SystemVulkanDriver.Profile.XCLIPSE, drivers[path])
         })
     }
 
     @Test fun renderNodeIdentityUsesTheDriverLinkOrUevent() {
         val device = Files.createTempDirectory("powervr-device").toFile()
         try {
-            assertFalse("missing identity is unavailable", SystemVulkanDriver.powerVrDevice(device))
+            assertFalse("missing identity is unavailable", SystemVulkanDriver.renderNodeDevice(device, SystemVulkanDriver.Profile.POWERVR))
             val uevent = File(device, "uevent")
             uevent.writeText("DRIVER=pvrsrvkm\nOF_NAME=gpu0\n")
-            assertTrue(SystemVulkanDriver.powerVrDevice(device))
+            assertTrue(SystemVulkanDriver.renderNodeDevice(device, SystemVulkanDriver.Profile.POWERVR))
             uevent.writeText("DRIVER=msm\nOF_COMPATIBLE_0=not-pvr\n")
-            assertFalse(SystemVulkanDriver.powerVrDevice(device))
+            assertFalse(SystemVulkanDriver.renderNodeDevice(device, SystemVulkanDriver.Profile.POWERVR))
             val driver = File(device, "driver").toPath()
             Files.createSymbolicLink(driver, File("../../drivers/pvrsrvkm").toPath())
-            assertTrue(SystemVulkanDriver.powerVrDevice(device))
+            assertTrue(SystemVulkanDriver.renderNodeDevice(device, SystemVulkanDriver.Profile.POWERVR))
             Files.delete(driver)
             Files.createSymbolicLink(driver, File("../../drivers/msm").toPath())
             uevent.writeText("DRIVER=pvrsrvkm\n")
-            assertFalse("an unrelated driver link must not fall back", SystemVulkanDriver.powerVrDevice(device))
+            assertFalse("an unrelated driver link must not fall back", SystemVulkanDriver.renderNodeDevice(device, SystemVulkanDriver.Profile.POWERVR))
         } finally {
             device.deleteRecursively()
         }
@@ -120,10 +153,10 @@ class SystemVulkanSelectionTest {
             "/dev/dri/renderD130" to "pvrsrvkm",
         )
         assertEquals("/dev/dri/renderD129", SystemVulkanDriver.findRenderNode(null) { path ->
-            SystemVulkanDriver.powerVrDriver(drivers[path])
+            SystemVulkanDriver.renderNodeDriver(SystemVulkanDriver.Profile.POWERVR, drivers[path])
         })
         assertEquals("/dev/dri/renderD130", SystemVulkanDriver.findRenderNode(null) { path ->
-            SystemVulkanDriver.powerVrDriver(drivers[path]) &&
+            SystemVulkanDriver.renderNodeDriver(SystemVulkanDriver.Profile.POWERVR, drivers[path]) &&
                 SystemVulkanDriver.renderNodeAvailable(true, path != "/dev/dri/renderD129", true)
         })
     }

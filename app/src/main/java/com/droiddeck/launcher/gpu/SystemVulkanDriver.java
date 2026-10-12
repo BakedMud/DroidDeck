@@ -22,10 +22,51 @@ import org.json.JSONObject;
 /** Isolated glibc-to-Android Vulkan bridge. It does not replace the rootfs's Mesa libraries. */
 public final class SystemVulkanDriver {
     private static final String ASSET = "hybris/runtime.tzst";
-    private static final String PVR_HAL = "/vendor/lib64/hw/vulkan.powervr.so";
-    private static final String XCLIPSE_HAL = "/vendor/lib64/hw/vulkan.samsung.so";
-    private static final String MALI_HAL = "/vendor/lib64/hw/vulkan.mali.so";
-    private static final String[] HALS = { PVR_HAL, XCLIPSE_HAL, MALI_HAL };
+    /** Vendor policy is independent from the shared libhybris HAL loader and Vulkan layer. */
+    public enum Profile {
+        POWERVR("powervr", "PowerVR", "/vendor/lib64/hw/vulkan.powervr.so", true,
+                "dxvk", "native", "VK_LAYER_HYBRIS_compat", "VK_LAYER_HYBRIS_compat", null,
+                new String[] {"pvrsrvkm", "pvr", "powervr"}),
+        XCLIPSE("xclipse", "Xclipse", "/vendor/lib64/hw/vulkan.samsung.so", true,
+                "dxvk-2.6.2", "native", "VK_LAYER_DROIDDECK_xclipse",
+                "VK_LAYER_DROIDDECK_xclipse:VK_LAYER_HYBRIS_compat",
+                "/usr/local/lib/droiddeck-xclipse", new String[] {"sgpu"}),
+        MALI("mali", "Mali", "/vendor/lib64/hw/vulkan.mali.so", false,
+                null, "x11-shm", "VK_LAYER_HYBRIS_compat", "VK_LAYER_HYBRIS_compat", null,
+                new String[] {});
+
+        public final String id;
+        public final String gpuName;
+        public final String halPath;
+        public final boolean requiresRenderNode;
+        public final String dxvkPayload;
+        public final String presentation;
+        final String sessionLayers;
+        final String gameLayers;
+        final String extraLayerPath;
+        private final String[] drmDrivers;
+
+        Profile(String id, String gpuName, String halPath, boolean requiresRenderNode,
+                String dxvkPayload, String presentation, String sessionLayers,
+                String gameLayers, String extraLayerPath, String[] drmDrivers) {
+            this.id = id;
+            this.gpuName = gpuName;
+            this.halPath = halPath;
+            this.requiresRenderNode = requiresRenderNode;
+            this.dxvkPayload = dxvkPayload;
+            this.presentation = presentation;
+            this.sessionLayers = sessionLayers;
+            this.gameLayers = gameLayers;
+            this.extraLayerPath = extraLayerPath;
+            this.drmDrivers = drmDrivers;
+        }
+
+        public static Profile fromHal(String hal) {
+            for (Profile profile : values()) if (profile.halPath.equals(hal)) return profile;
+            return null;
+        }
+    }
+
     private static final String[] REQUIRED = {
         "lib/libhybris-vulkan-icd.so.0", "lib/libhybris-common.so.1",
         "lib/libhybris/linker/q.so", "lib/libVkLayer_hybris_compat.so",
@@ -37,51 +78,60 @@ public final class SystemVulkanDriver {
         "dxvk/x64/d3d11.dll", "dxvk/x64/dxgi.dll"
     };
 
-    /** Rootfs directory of the Xclipse layer the apk stages (SessionFiles). */
-    private static final String XCLIPSE_LAYER_DIR = "/usr/local/lib/droiddeck-xclipse";
-
     private SystemVulkanDriver() {}
 
-    /** The first vendor HAL present, or null. */
+    public static Profile profile() {
+        return findProfile(path -> new File(path).isFile());
+    }
+
+    /** An ambiguous HAL installation must not accidentally activate another vendor's quirks. */
+    static Profile findProfile(Predicate<String> present) {
+        Profile selected = null;
+        for (Profile profile : Profile.values()) {
+            if (!present.test(profile.halPath)) continue;
+            if (selected != null) return null;
+            selected = profile;
+        }
+        return selected;
+    }
+
     public static String hal() {
-        for (String path : HALS) if (new File(path).isFile()) return path;
-        return null;
+        Profile selected = profile();
+        return selected == null ? null : selected.halPath;
     }
 
-    /** Samsung's Xclipse (Exynos, sgpu) rather than PowerVR. */
-    public static boolean isXclipse() {
-        String hal = hal();
-        return hal != null && hal.endsWith("/vulkan.samsung.so");
+    public static String systemHalPath() { return hal(); }
+    public static boolean isPowerVr() { return profile() == Profile.POWERVR; }
+    public static boolean isXclipse() { return profile() == Profile.XCLIPSE; }
+    public static boolean isMali() { return profile() == Profile.MALI; }
+    public static boolean isSupportedGpu() { return profile() != null; }
+
+    public static String gpuName() {
+        Profile selected = profile();
+        return selected == null ? "Vulkan" : selected.gpuName;
     }
 
-    /** The system-driver GPU family, for labels. */
-    public static String gpuName() { return isXclipse() ? "Xclipse" : isMali() ? "Mali" : "PowerVR"; }
-
-    /** Whether a system-driver GPU (PowerVR or Xclipse) is present; the name predates Xclipse. */
-    public static boolean isPowerVr() { return PVR_HAL.equals(hal()) || isXclipse(); }
-
-    public static boolean isMali() { return MALI_HAL.equals(hal()); }
-
-    public static boolean isSupportedGpu() { return isPowerVr() || isMali(); }
-
-    public static String systemHalPath() {
-        return hal();
+    public static boolean requiresRenderNode() {
+        Profile selected = profile();
+        return selected != null && selected.requiresRenderNode;
     }
 
-    /** PowerVR needs its DRM node. Mali uses Android buffers and X11 shared-memory presentation. */
     public static boolean isAvailable() {
-        return isPowerVr() ? renderNodeAvailable() : isMali();
+        Profile selected = profile();
+        return selected != null && (!selected.requiresRenderNode || renderNodeAvailable());
     }
 
     public static boolean renderNodeAvailable() {
         return renderNodePath() != null;
     }
 
-    /** Select the actual PowerVR node, including devices where another GPU owns renderD128. */
+    /** Select this HAL profile's GPU node, skipping display controllers and other vendors. */
     public static String renderNodePath() {
+        Profile selected = profile();
+        if (selected == null || !selected.requiresRenderNode) return null;
         String[] nodes = new File("/dev/dri").list();
         if (nodes == null) nodes = new File("/sys/class/drm").list();
-        return findRenderNode(nodes, SystemVulkanDriver::renderNodeAvailable);
+        return findRenderNode(nodes, node -> renderNodeAvailable(node, selected));
     }
 
     static String findRenderNode(String[] nodes, Predicate<String> available) {
@@ -98,24 +148,25 @@ public final class SystemVulkanDriver {
         return null;
     }
 
-    private static boolean renderNodeAvailable(String node) {
+    private static boolean renderNodeAvailable(String node, Profile selected) {
         try {
             if (!renderNodeAvailable(OsConstants.S_ISCHR(Os.stat(node).st_mode),
                     Os.access(node, OsConstants.R_OK), Os.access(node, OsConstants.W_OK))) return false;
-            return powerVrDevice(new File("/sys/class/drm/" + new File(node).getName() + "/device"));
+            return renderNodeDevice(new File("/sys/class/drm/" + new File(node).getName() + "/device"), selected);
         } catch (ErrnoException error) {
             return false;
         }
     }
 
-    static boolean powerVrDriver(String driver) {
-        return "pvrsrvkm".equals(driver) || "pvr".equals(driver) || "powervr".equals(driver)
-                || "sgpu".equals(driver);
+    static boolean renderNodeDriver(Profile profile, String driver) {
+        if (profile == null) return false;
+        for (String name : profile.drmDrivers) if (name.equals(driver)) return true;
+        return false;
     }
 
-    static boolean powerVrDevice(File device) {
+    static boolean renderNodeDevice(File device, Profile selected) {
         try {
-            return powerVrDriver(Files.readSymbolicLink(new File(device, "driver").toPath())
+            return renderNodeDriver(selected, Files.readSymbolicLink(new File(device, "driver").toPath())
                     .getFileName().toString());
         } catch (IOException error) {
             // Some Android policies expose uevent but deny reading the driver symlink.
@@ -123,7 +174,7 @@ public final class SystemVulkanDriver {
                     new File(device, "uevent").toPath(), StandardCharsets.US_ASCII)) {
                 String line;
                 while ((line = input.readLine()) != null)
-                    if (line.startsWith("DRIVER=")) return powerVrDriver(line.substring(7));
+                    if (line.startsWith("DRIVER=")) return renderNodeDriver(selected, line.substring(7));
             } catch (IOException ignored) { }
             return false;
         }
@@ -139,7 +190,8 @@ public final class SystemVulkanDriver {
 
     /** The bundled DXVK profile requires features missing from Mali; keep its choices editable. */
     public static boolean managesDxvk(String choice) {
-        return usesDefault(isPowerVr(), choice);
+        Profile selected = profile();
+        return usesDefault(selected != null && selected.dxvkPayload != null, choice);
     }
 
     static boolean usesDefault(boolean systemGpu, String choice) {
@@ -148,9 +200,10 @@ public final class SystemVulkanDriver {
 
     /** APK-versioned directories stay intact while an older session still has libraries mapped. */
     public static synchronized File prepare(Context context) throws IOException {
-        if (!isSupportedGpu()) throw new IOException("System Vulkan driver is unavailable");
-        if (isPowerVr() && !renderNodeAvailable()) throw new IOException(
-                "System PowerVR requires an identifiable, readable and writable DRM render node");
+        Profile selected = profile();
+        if (selected == null) throw new IOException("System Vulkan driver is unavailable");
+        if (selected.requiresRenderNode && !renderNodeAvailable()) throw new IOException(
+                "System " + selected.gpuName + " requires an identifiable, readable and writable DRM render node");
         File target = runtimeDirectory(context);
         File base = target.getParentFile();
         if (complete(target)) return target;
@@ -235,41 +288,44 @@ public final class SystemVulkanDriver {
         File directory;
         try { directory = prepare(context); }
         catch (IOException error) { throw new IllegalStateException("System Vulkan runtime is unavailable", error); }
-        addEnvironment(directory, systemHalPath(), isPowerVr() ? renderNodePath() : null,
+        addEnvironment(directory, systemHalPath(), requiresRenderNode() ? renderNodePath() : null,
                 Build.VERSION.SDK_INT, environment);
     }
 
     static void addEnvironment(File directory, String hal, String node, int sdk, List<String> environment) {
-        if (!PVR_HAL.equals(hal) && !XCLIPSE_HAL.equals(hal) && !MALI_HAL.equals(hal))
-            throw new IllegalStateException("System Vulkan driver is unavailable");
-        boolean xclipse = XCLIPSE_HAL.equals(hal);
-        boolean powerVr = !MALI_HAL.equals(hal);
-        if (powerVr && node == null) throw new IllegalStateException("System Vulkan render node is unavailable");
+        Profile selected = Profile.fromHal(hal);
+        if (selected == null) throw new IllegalStateException("System Vulkan driver is unavailable");
+        if (selected.requiresRenderNode && node == null)
+            throw new IllegalStateException("System " + selected.gpuName + " render node is unavailable");
         environment.add("HYBRIS_ANDROID_SDK_VERSION=" + sdk);
-        environment.add("HYBRIS_VULKAN_HAL=" + hal);
+        environment.add("HYBRIS_VULKAN_HAL=" + selected.halPath);
         environment.add("HYBRIS_LINKER_DIR=" + new File(directory, "lib/libhybris/linker").getPath());
         // Prefer framework dependencies for the system Vulkan loader, including libbase.so.
         environment.add("HYBRIS_LD_LIBRARY_PATH=/system/lib64:/system_ext/lib64:/vendor/lib64/egl:/vendor/lib64/hw:/vendor/lib64");
-        // Xclipse's session clients only need its driver layer. Games additionally use BC emulation.
-        String layers = xclipse ? "VK_LAYER_DROIDDECK_xclipse" : "VK_LAYER_HYBRIS_compat";
-        environment.add("VK_LAYER_PATH=" + new File(directory, "lib").getPath() + (xclipse ? ":" + XCLIPSE_LAYER_DIR : ""));
-        environment.add("VK_INSTANCE_LAYERS=" + layers);
-        environment.add("DROIDDECK_HYBRIS_LAYERS=" + (xclipse ? layers + ":VK_LAYER_HYBRIS_compat" : layers));
-        if (xclipse) environment.add("DROIDDECK_HYBRIS_LAYER_PATH=" + XCLIPSE_LAYER_DIR);
-        // DXVK 3 needs 256 bytes of push constants; this driver has 128.
-        if (xclipse) environment.add("DROIDDECK_HYBRIS_DXVK=dxvk-2.6.2");
-        // All three drivers use Android-buffer Wayland presentation. Mali has no usable DRM node.
+        String layerPath = new File(directory, "lib").getPath();
+        if (selected.extraLayerPath != null) layerPath += ":" + selected.extraLayerPath;
+        environment.add("VK_LAYER_PATH=" + layerPath);
+        environment.add("VK_INSTANCE_LAYERS=" + selected.sessionLayers);
+        environment.add("DROIDDECK_HYBRIS_SESSION_LAYERS=" + selected.sessionLayers);
+        environment.add("DROIDDECK_HYBRIS_LAYERS=" + selected.gameLayers);
+        if (selected.extraLayerPath != null)
+            environment.add("DROIDDECK_HYBRIS_LAYER_PATH=" + selected.extraLayerPath);
+        if (selected.dxvkPayload != null)
+            environment.add("DROIDDECK_HYBRIS_DXVK=" + selected.dxvkPayload);
+        // The outer compositor always uses Android-buffer Wayland presentation.
         environment.add("BL_GAMESCOPE_BACKEND=sdl");
-        if (powerVr) {
-            // The Android pvr kernel accepts Vulkan DMA-BUF imports but rejects PRIME GEM handles.
+        if (selected.requiresRenderNode) {
+            // Preserve the existing Android DRM shim and Steam GL presentation for both DRM profiles.
             environment.add("BL_POWERVR_DRM_HANDLES=1");
             environment.add("BL_POWERVR_RENDER_NODE=" + node);
             environment.add("BL_STEAM_GL_PRESENT=1");
         }
-        environment.add("DROIDDECK_SYSTEM_VULKAN_GPU=" + (xclipse ? "xclipse" : powerVr ? "powervr" : "mali"));
+        environment.add("DROIDDECK_SYSTEM_VULKAN_GPU=" + selected.id);
         environment.add("DROIDDECK_SYSTEM_VULKAN_RUNTIME=" + directory.getPath());
-        // Retain the original variable for older PowerVR guest helpers. Mali shares WSI,
-        // but must not inherit the PowerVR DXVK profile: several required features are absent.
-        if (powerVr) environment.add("DROIDDECK_POWERVR_RUNTIME=" + directory.getPath());
+        environment.add("DROIDDECK_SYSTEM_VULKAN_PRESENTATION=" + selected.presentation);
+        environment.add("DROIDDECK_SYSTEM_VULKAN_DXVK=" + (selected.dxvkPayload == null ? "user" : "managed"));
+        // Older helpers use this name for both managed profiles. Mali must retain its own DXVK choice.
+        if (selected.dxvkPayload != null)
+            environment.add("DROIDDECK_POWERVR_RUNTIME=" + directory.getPath());
     }
 }

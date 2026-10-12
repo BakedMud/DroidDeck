@@ -27,7 +27,7 @@ import java.util.zip.ZipInputStream;
 /**
  * The Vulkan driver the in-app compositor runs on. Adreno uses Turnip: the system Adreno driver
  * does not implement VK_EXT_image_drm_format_modifier, so importing the dma-bufs gamescope hands
- * over fails and the session renders nothing. PowerVR and Mali use the system driver and Android hardware
+ * over fails and the session renders nothing. PowerVR, Xclipse, and Mali use the system driver and Android hardware
  * buffers instead. Two Turnip builds ship in the apk, one per Adreno
  * generation, and the GPU decides which is unpacked - unless the user has imported an AdrenoTools
  * zip of their own and chosen it, which then wins.

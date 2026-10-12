@@ -287,12 +287,19 @@ def system_graphics_launch(command, env):
     directory = Path(runtime)
     if not directory.is_absolute():
         raise SystemGraphicsError("system Vulkan runtime path is not absolute")
-    mali = env.get("DROIDDECK_SYSTEM_VULKAN_GPU") == "mali"
+    # Old launchers only identify the GPU. New profiles choose presentation and DXVK independently.
+    legacy_mali = env.get("DROIDDECK_SYSTEM_VULKAN_GPU") == "mali"
+    presentation = env.get("DROIDDECK_SYSTEM_VULKAN_PRESENTATION") or ("x11-shm" if legacy_mali else "native")
+    dxvk = env.get("DROIDDECK_SYSTEM_VULKAN_DXVK") or ("user" if legacy_mali else "managed")
+    if presentation not in ("native", "x11-shm"):
+        raise SystemGraphicsError("invalid system Vulkan presentation: %s" % presentation)
+    if dxvk not in ("managed", "user"):
+        raise SystemGraphicsError("invalid system Vulkan DXVK policy: %s" % dxvk)
     required = (
         "wsi/libVkLayer_window_system_integration.so",
         "wsi/VkLayer_window_system_integration.json", "lib/libVkLayer_hybris_compat.so",
     )
-    if not mali:
+    if dxvk == "managed":
         # run-proton.py picks the same payload; Xclipse needs at most 128 bytes of push data.
         payload = env.get("DROIDDECK_HYBRIS_DXVK") or "dxvk"
         if not payload.startswith("dxvk") or "/" in payload:
@@ -305,7 +312,7 @@ def system_graphics_launch(command, env):
             if not path.is_file() or not path.stat().st_size:
                 raise SystemGraphicsError("missing system Vulkan component: %s" % name)
         wrapper = directory / "run-proton.py"
-        if not mali and not os.access(wrapper, os.X_OK):
+        if dxvk == "managed" and not os.access(wrapper, os.X_OK):
             raise SystemGraphicsError("system Vulkan Proton wrapper is not executable")
     except OSError as error:
         raise SystemGraphicsError("system Vulkan component is unreadable: %s" % error) from error
@@ -319,12 +326,10 @@ def system_graphics_launch(command, env):
         "VK_LOADER_LAYERS_DISABLE": "*gamescope*",
         "DISABLE_VK_LAYER_VALVE_steam_fossilize_1": "1",
     })
-    if mali:
-        # Gamescope's Mali Xwayland has no DRI3; keep GPU rendering and present via X11 SHM.
-        # The bundled PowerVR DXVK needs features Mali may lack. Keep the selected Proton,
-        # DXVK and WineD3D preference instead of replacing them with that runtime's wrapper.
+    if presentation == "x11-shm":
+        # A profile without working DRI3 keeps GPU rendering and presents via X11 SHM.
         result["WSI_X11_FORCE_SHM"] = "1"
-    else:
+    if dxvk == "managed":
         result["HYBRIS_BC_TEXTURES"] = "dxvk"
         result.pop("PROTON_USE_WINED3D", None)
         command = [str(wrapper), *command]

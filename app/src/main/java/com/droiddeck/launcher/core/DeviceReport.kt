@@ -130,7 +130,7 @@ object DeviceReport {
         val turnip = TurnipDriver(context)
         val androidChoice = SessionPrefs.androidDriver(context)
         val displayId = androidChoice.ifEmpty { turnip.autoId() }
-        val displayLabel = if (displayId == "system") DeviceInfo.builtinDriverLabel(SystemVulkanDriver.isPowerVr(), runtime = false, mali = SystemVulkanDriver.isMali())
+        val displayLabel = if (displayId == "system") DeviceInfo.builtinDriverLabel(SystemVulkanDriver.profile(), runtime = false)
             else "${turnip.displayName(displayId)} ${turnip.driverVersion(displayId)}".trim()
         k("Display driver (chosen)", if (androidChoice.isEmpty()) "Auto -> $displayLabel" else androidChoice)
         k("  name / version", displayLabel)
@@ -138,7 +138,7 @@ object DeviceReport {
         val lm = LinuxVulkanDriverManager(context)
         run {
             val id = SessionPrefs.linuxDriver(context)
-            val label = if (id.isEmpty()) DeviceInfo.builtinDriverLabel(SystemVulkanDriver.isPowerVr(), runtime = true, mali = SystemVulkanDriver.isMali())
+            val label = if (id.isEmpty()) DeviceInfo.builtinDriverLabel(SystemVulkanDriver.profile(), runtime = true)
             else "${lm.getDriverName(id)} ${lm.getDriverVersion(id)}".trim() +
                 lm.getMinGlibc(id).let { if (it.isEmpty()) "" else " (glibc $it+)" } +
                 if (lm.isInstalled(id)) "" else if (SystemVulkanDriver.isSupportedGpu()) "  [MISSING - select an installed driver or Auto]"

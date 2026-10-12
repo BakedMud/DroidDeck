@@ -11,6 +11,8 @@ import unittest
 MANGOAPP = Path(__file__).resolve().parents[1] / "mangoapp/mangoapp"
 GRAPHICS_KEYS = (
     "DROIDDECK_SYSTEM_VULKAN_GPU", "DROIDDECK_SYSTEM_VULKAN_RUNTIME",
+    "DROIDDECK_SYSTEM_VULKAN_PRESENTATION", "DROIDDECK_SYSTEM_VULKAN_DXVK",
+    "DROIDDECK_HYBRIS_SESSION_LAYERS", "DROIDDECK_HYBRIS_LAYER_PATH",
     "DROIDDECK_POWERVR_RUNTIME", "VK_LAYER_PATH", "VK_INSTANCE_LAYERS",
     "WSI_X11_FORCE_SHM", "ENABLE_GAMESCOPE_WSI", "VK_LOADER_LAYERS_DISABLE",
     "DISABLE_WSI_LAYER", "XDG_SESSION_TYPE", "WAYLAND_DISPLAY", "LD_LIBRARY_PATH",
@@ -116,7 +118,7 @@ class MangoAppPresentationTest(unittest.TestCase):
         }), "/legacy runtime")
 
     def test_powervr_adreno_and_manual_drivers_keep_existing_profile(self):
-        for gpu in ("powervr", "adreno", ""):
+        for gpu in ("powervr", "xclipse", "adreno", ""):
             with self.subTest(gpu=gpu):
                 self.assert_outer_profile(self.launch({
                     "DROIDDECK_SYSTEM_VULKAN_GPU": gpu,
@@ -132,6 +134,30 @@ class MangoAppPresentationTest(unittest.TestCase):
                 self.assert_outer_profile(self.launch({
                     "DROIDDECK_SYSTEM_VULKAN_GPU": "mali", **runtime_variables,
                 }))
+
+    def test_explicit_shm_preserves_vendor_layers_without_a_mali_identity(self):
+        graphics = self.launch({
+            "DROIDDECK_SYSTEM_VULKAN_GPU": "future-vendor", "DROIDDECK_SYSTEM_VULKAN_RUNTIME": "/runtime",
+            "DROIDDECK_SYSTEM_VULKAN_PRESENTATION": "x11-shm",
+            "DROIDDECK_HYBRIS_SESSION_LAYERS": "VK_LAYER_vendor_session",
+            "DROIDDECK_HYBRIS_LAYER_PATH": "/vendor-layer",
+        })
+        self.assertEqual(graphics["VK_LAYER_PATH"], "/runtime/wsi:/runtime/lib:/vendor-layer")
+        self.assertEqual(graphics["VK_INSTANCE_LAYERS"], "VK_LAYER_window_system_integration:VK_LAYER_vendor_session")
+        self.assertEqual(graphics["WSI_X11_FORCE_SHM"], "1")
+
+    def test_native_capability_overrides_mali_and_keeps_xclipse_outer_layers(self):
+        for gpu in ("mali", "xclipse"):
+            with self.subTest(gpu=gpu):
+                graphics = self.launch({
+                    "DROIDDECK_SYSTEM_VULKAN_GPU": gpu, "DROIDDECK_SYSTEM_VULKAN_RUNTIME": "/runtime",
+                    "DROIDDECK_SYSTEM_VULKAN_PRESENTATION": "native",
+                    "VK_LAYER_PATH": "/runtime/lib:/usr/local/lib/droiddeck-xclipse",
+                    "VK_INSTANCE_LAYERS": "VK_LAYER_DROIDDECK_xclipse",
+                })
+                self.assertEqual(graphics["VK_LAYER_PATH"], "/runtime/lib:/usr/local/lib/droiddeck-xclipse")
+                self.assertEqual(graphics["VK_INSTANCE_LAYERS"], "VK_LAYER_DROIDDECK_xclipse")
+                self.assertEqual(graphics["WSI_X11_FORCE_SHM"], "0")
 
 if __name__ == "__main__":
     unittest.main()

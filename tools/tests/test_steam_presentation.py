@@ -9,6 +9,8 @@ import unittest
 SESSION = Path(__file__).resolve().parents[1] / "linuxfs/overlay/usr/local/bin/droiddeck-session"
 GRAPHICS_KEYS = ("BL_STEAM_GL_PRESENT", "DISABLE_GAMESCOPE_WSI", "LIBGL_KOPPER_DISABLE",
                  "DROIDDECK_SYSTEM_VULKAN_GPU", "DROIDDECK_SYSTEM_VULKAN_RUNTIME", "DROIDDECK_POWERVR_RUNTIME",
+                 "DROIDDECK_SYSTEM_VULKAN_PRESENTATION", "DROIDDECK_SYSTEM_VULKAN_DXVK",
+                 "DROIDDECK_HYBRIS_SESSION_LAYERS", "DROIDDECK_HYBRIS_LAYER_PATH",
                  "VK_LAYER_PATH", "VK_INSTANCE_LAYERS", "WSI_X11_FORCE_SHM", "ENABLE_GAMESCOPE_WSI",
                  "VK_LOADER_LAYERS_DISABLE", "DISABLE_WSI_LAYER")
 
@@ -46,9 +48,6 @@ class SteamPresentationTest(unittest.TestCase):
                                     env=env, capture_output=True, text=True, timeout=5)
             self.assertEqual(result.returncode, 0, result.stderr)
             launch = json.loads(result.stdout.splitlines()[-1])
-            mali = env.get("DROIDDECK_SYSTEM_VULKAN_GPU") == "mali" and (
-                env.get("DROIDDECK_SYSTEM_VULKAN_RUNTIME") or env.get("DROIDDECK_POWERVR_RUNTIME"))
-            self.assertEqual(enabled == "1" and not mali, launch["path"].startswith("/usr/local/libexec/droiddeck-steam:"))
             self.assertEqual(launch["helper"], str(Path(tmp) / "steamrtarm64/steamwebhelper"))
             return launch
 
@@ -58,6 +57,7 @@ class SteamPresentationTest(unittest.TestCase):
         self.assertNotIn("-cef-disable-gpu-compositing", result["args"])
         self.assertIsNone(result["disable"])
         self.assertIsNone(result["kopper"])
+        self.assertFalse(result["path"].startswith("/usr/local/libexec/droiddeck-steam:"))
 
     def test_system_powervr_keeps_gpu_gl_with_software_web_compositing(self):
         result = self.launch("1")
@@ -69,6 +69,7 @@ class SteamPresentationTest(unittest.TestCase):
         self.assertEqual(result["disable"], "1")
         self.assertEqual(result["kopper"], "true")
         self.assertEqual(result["args"][-1], "steam://open/main")
+        self.assertTrue(result["path"].startswith("/usr/local/libexec/droiddeck-steam:"))
 
     def test_disabled_option_preserves_existing_environment(self):
         result = self.launch("0", {"DISABLE_GAMESCOPE_WSI": "0", "LIBGL_KOPPER_DISABLE": "false"})
@@ -76,6 +77,7 @@ class SteamPresentationTest(unittest.TestCase):
         self.assertNotIn("-cef-disable-gpu-compositing", result["args"])
         self.assertEqual(result["disable"], "0")
         self.assertEqual(result["kopper"], "false")
+        self.assertFalse(result["path"].startswith("/usr/local/libexec/droiddeck-steam:"))
 
     def test_mali_uses_vulkan_x11_shm_with_bundled_layers(self):
         for key in ("DROIDDECK_SYSTEM_VULKAN_RUNTIME", "DROIDDECK_POWERVR_RUNTIME"):
@@ -96,6 +98,38 @@ class SteamPresentationTest(unittest.TestCase):
                 self.assertIsNone(result["graphics"]["DISABLE_WSI_LAYER"])
                 self.assertIsNone(result["disable"])
                 self.assertIsNone(result["kopper"])
+                self.assertFalse(result["path"].startswith("/usr/local/libexec/droiddeck-steam:"))
+
+    def test_explicit_shm_uses_vulkan_and_keeps_vendor_layers(self):
+        result = self.launch("1", {
+            "DROIDDECK_SYSTEM_VULKAN_GPU": "future-vendor", "DROIDDECK_SYSTEM_VULKAN_RUNTIME": "/runtime",
+            "DROIDDECK_SYSTEM_VULKAN_PRESENTATION": "x11-shm",
+            "DROIDDECK_HYBRIS_SESSION_LAYERS": "VK_LAYER_vendor_session",
+            "DROIDDECK_HYBRIS_LAYER_PATH": "/vendor-layer",
+        })
+        self.assertIn("-cef-use-angle=vulkan", result["args"])
+        self.assertNotIn("-cef-disable-gpu-compositing", result["args"])
+        self.assertFalse(result["path"].startswith("/usr/local/libexec/droiddeck-steam:"))
+        self.assertEqual(result["graphics"]["VK_LAYER_PATH"], "/runtime/wsi:/runtime/lib:/vendor-layer")
+        self.assertEqual(result["graphics"]["VK_INSTANCE_LAYERS"],
+                         "VK_LAYER_window_system_integration:VK_LAYER_vendor_session")
+        self.assertEqual(result["graphics"]["WSI_X11_FORCE_SHM"], "1")
+
+    def test_native_capability_overrides_mali_and_preserves_xclipse_steam_gl(self):
+        for gpu in ("mali", "xclipse"):
+            with self.subTest(gpu=gpu):
+                result = self.launch("1", {
+                    "DROIDDECK_SYSTEM_VULKAN_GPU": gpu, "DROIDDECK_SYSTEM_VULKAN_RUNTIME": "/runtime",
+                    "DROIDDECK_SYSTEM_VULKAN_PRESENTATION": "native",
+                    "VK_LAYER_PATH": "/runtime/lib:/usr/local/lib/droiddeck-xclipse",
+                    "VK_INSTANCE_LAYERS": "VK_LAYER_DROIDDECK_xclipse",
+                })
+                self.assertIn("-cef-use-angle=gl", result["args"])
+                self.assertIn("-cef-disable-gpu-compositing", result["args"])
+                self.assertTrue(result["path"].startswith("/usr/local/libexec/droiddeck-steam:"))
+                self.assertEqual(result["graphics"]["VK_LAYER_PATH"], "/runtime/lib:/usr/local/lib/droiddeck-xclipse")
+                self.assertEqual(result["graphics"]["VK_INSTANCE_LAYERS"], "VK_LAYER_DROIDDECK_xclipse")
+                self.assertIsNone(result["graphics"]["WSI_X11_FORCE_SHM"])
 
     def test_generic_runtime_takes_precedence_over_legacy_alias(self):
         result = self.launch(inherited={
@@ -105,7 +139,7 @@ class SteamPresentationTest(unittest.TestCase):
         self.assertEqual(result["graphics"]["VK_LAYER_PATH"], "/new/wsi:/new/lib")
 
     def test_manual_driver_does_not_enable_the_mali_profile(self):
-        for gpu, runtime in (("mali", ""), ("", "/runtime"), ("powervr", "/runtime")):
+        for gpu, runtime in (("mali", ""), ("", "/runtime"), ("powervr", "/runtime"), ("xclipse", "/runtime")):
             with self.subTest(gpu=gpu, runtime=runtime):
                 result = self.launch(inherited={
                     "DROIDDECK_SYSTEM_VULKAN_GPU": gpu, "DROIDDECK_SYSTEM_VULKAN_RUNTIME": runtime,
@@ -133,6 +167,7 @@ class SteamPresentationTest(unittest.TestCase):
             env = {key: value for key, value in os.environ.items() if key not in GRAPHICS_KEYS}
             env.update(PATH=tmp + os.pathsep + env.get("PATH", ""), BL_MANGOAPP="0", BL_GAMESCOPE_BACKEND="sdl",
                        DROIDDECK_SYSTEM_VULKAN_GPU="mali", DROIDDECK_SYSTEM_VULKAN_RUNTIME="/runtime",
+                       DROIDDECK_SYSTEM_VULKAN_PRESENTATION="x11-shm",
                        VK_LAYER_PATH="/runtime/lib", VK_INSTANCE_LAYERS="VK_LAYER_HYBRIS_compat")
             run = subprocess.run(["bash", "-c", script], env=env, text=True, capture_output=True, timeout=5)
             self.assertEqual(run.returncode, 0, run.stderr)

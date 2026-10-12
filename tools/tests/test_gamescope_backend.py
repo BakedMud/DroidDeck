@@ -10,6 +10,8 @@ import unittest
 SESSION = Path(__file__).resolve().parents[1] / "linuxfs/overlay/usr/local/bin/droiddeck-session"
 DESKTOP_GPU = Path(__file__).resolve().parents[1] / "linuxfs/desktop/droiddeck-gpu"
 GRAPHICS_KEYS = ("DROIDDECK_SYSTEM_VULKAN_GPU", "DROIDDECK_SYSTEM_VULKAN_RUNTIME", "DROIDDECK_POWERVR_RUNTIME",
+                 "DROIDDECK_SYSTEM_VULKAN_PRESENTATION", "DROIDDECK_SYSTEM_VULKAN_DXVK",
+                 "DROIDDECK_HYBRIS_SESSION_LAYERS", "DROIDDECK_HYBRIS_LAYER_PATH",
                  "VK_LAYER_PATH", "VK_INSTANCE_LAYERS", "WSI_X11_FORCE_SHM", "ENABLE_GAMESCOPE_WSI",
                  "VK_LOADER_LAYERS_DISABLE", "DISABLE_WSI_LAYER")
 
@@ -162,7 +164,7 @@ class DesktopGamescopeBackendTest(unittest.TestCase):
                 self.assertEqual(["demo", "one argument"], capture["client"]["args"])
 
     def test_manual_and_powervr_profiles_keep_inherited_vulkan_settings(self):
-        for gpu, runtime in (("powervr", "/runtime"), ("mali", ""), ("", "/runtime")):
+        for gpu, runtime in (("powervr", "/runtime"), ("xclipse", "/runtime"), ("mali", ""), ("", "/runtime")):
             with self.subTest(gpu=gpu, runtime=runtime):
                 result, capture = self.launch("sdl", {
                     "DROIDDECK_SYSTEM_VULKAN_GPU": gpu, "DROIDDECK_SYSTEM_VULKAN_RUNTIME": runtime,
@@ -188,3 +190,36 @@ class DesktopGamescopeBackendTest(unittest.TestCase):
             self.assertIsNone(capture["graphics"][key])
         self.assertEqual("/new-runtime/wsi:/new-runtime/lib", capture["client"]["env"]["VK_LAYER_PATH"])
         self.assertEqual("1", capture["client"]["env"]["WSI_X11_FORCE_SHM"])
+
+    def test_shm_capability_preserves_vendor_layers_across_nested_launch(self):
+        result, capture = self.launch("sdl", {
+            "DROIDDECK_SYSTEM_VULKAN_GPU": "future-vendor", "DROIDDECK_SYSTEM_VULKAN_RUNTIME": "/runtime",
+            "DROIDDECK_SYSTEM_VULKAN_PRESENTATION": "x11-shm",
+            "DROIDDECK_HYBRIS_SESSION_LAYERS": "VK_LAYER_vendor_session",
+            "DROIDDECK_HYBRIS_LAYER_PATH": "/vendor-layer",
+            "VK_LAYER_PATH": "/runtime/wsi:/runtime/lib:/vendor-layer",
+            "VK_INSTANCE_LAYERS": "VK_LAYER_window_system_integration:VK_LAYER_vendor_session",
+            "WSI_X11_FORCE_SHM": "1",
+        })
+        self.assertEqual(0, result.returncode, result.stderr)
+        self.assertEqual("/runtime/lib:/vendor-layer", capture["graphics"]["VK_LAYER_PATH"])
+        self.assertEqual("VK_LAYER_vendor_session", capture["graphics"]["VK_INSTANCE_LAYERS"])
+        self.assertIsNone(capture["graphics"]["WSI_X11_FORCE_SHM"])
+        client = capture["client"]["env"]
+        self.assertEqual("/runtime/wsi:/runtime/lib:/vendor-layer", client["VK_LAYER_PATH"])
+        self.assertEqual("VK_LAYER_window_system_integration:VK_LAYER_vendor_session", client["VK_INSTANCE_LAYERS"])
+        self.assertEqual("1", client["WSI_X11_FORCE_SHM"])
+
+    def test_native_capability_overrides_legacy_mali_and_preserves_xclipse(self):
+        for gpu in ("mali", "xclipse"):
+            with self.subTest(gpu=gpu):
+                result, capture = self.launch("sdl", {
+                    "DROIDDECK_SYSTEM_VULKAN_GPU": gpu, "DROIDDECK_SYSTEM_VULKAN_RUNTIME": "/runtime",
+                    "DROIDDECK_SYSTEM_VULKAN_PRESENTATION": "native",
+                    "VK_LAYER_PATH": "/runtime/lib:/usr/local/lib/droiddeck-xclipse",
+                    "VK_INSTANCE_LAYERS": "VK_LAYER_DROIDDECK_xclipse", "WSI_X11_FORCE_SHM": "0",
+                })
+                self.assertEqual(0, result.returncode, result.stderr)
+                self.assert_xwayland_application(capture)
+                for key in ("VK_LAYER_PATH", "VK_INSTANCE_LAYERS", "WSI_X11_FORCE_SHM"):
+                    self.assertEqual(capture["graphics"][key], capture["client"]["env"][key])

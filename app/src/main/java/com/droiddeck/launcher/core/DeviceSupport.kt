@@ -7,7 +7,7 @@ import com.droiddeck.launcher.gpu.SystemVulkanDriver
 import java.io.File
 
 /** Whether this device has a graphics backend the runtime can use. Adreno uses Turnip;
- * PowerVR and Mali use their vendor Vulkan drivers through the bundled runtime bridge. Other GPU families
+ * PowerVR, Xclipse, and Mali use their vendor Vulkan drivers through the bundled runtime bridge. Other GPU families
  * still need a supported backend before a session can display frames. */
 object DeviceSupport {
     fun adreno(): Boolean =
