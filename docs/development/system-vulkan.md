@@ -74,11 +74,13 @@ component tests do not establish support for every driver version or fix Mali's
 first frame by themselves. Full APK CI and installed-device regressions remain
 separate validation gates.
 
-The component build is available through the existing APK workflow:
+The component build is available through the existing APK workflow. Replace
+`<reviewed-branch-or-tag>` with the reviewed branch or tag containing the component
+recipe and workflow:
 
 ```sh
 gh workflow run build.yml --repo wallentx/DroidDeck \
-  --ref wallentx/powervr-mali -f component=hybris
+  --ref '<reviewed-branch-or-tag>' -f component=hybris
 ```
 
 This selects an artifact-only libhybris job. It produces `runtime.tzst`, its
