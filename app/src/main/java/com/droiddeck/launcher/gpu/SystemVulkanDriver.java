@@ -25,14 +25,13 @@ public final class SystemVulkanDriver {
     /** Vendor policy is independent from the shared libhybris HAL loader and Vulkan layer. */
     public enum Profile {
         POWERVR("powervr", "PowerVR", "/vendor/lib64/hw/vulkan.powervr.so", true,
-                "dxvk", "native", "VK_LAYER_HYBRIS_compat", "VK_LAYER_HYBRIS_compat", null,
+                "dxvk", "native", "VK_LAYER_HYBRIS_compat", "VK_LAYER_HYBRIS_compat", null, null,
                 new String[] {"pvrsrvkm", "pvr", "powervr"}),
         XCLIPSE("xclipse", "Xclipse", "/vendor/lib64/hw/vulkan.samsung.so", true,
-                "dxvk-2.6.2", "native", "VK_LAYER_DROIDDECK_xclipse",
-                "VK_LAYER_DROIDDECK_xclipse:VK_LAYER_HYBRIS_compat",
-                "/usr/local/lib/droiddeck-xclipse", new String[] {"sgpu"}),
+                "dxvk-2.6.2", "native", "VK_LAYER_HYBRIS_compat", "VK_LAYER_HYBRIS_compat", null, "0",
+                new String[] {"sgpu"}),
         MALI("mali", "Mali", "/vendor/lib64/hw/vulkan.mali.so", false,
-                null, "x11-shm", "VK_LAYER_HYBRIS_compat", "VK_LAYER_HYBRIS_compat", null,
+                null, "x11-shm", "VK_LAYER_HYBRIS_compat", "VK_LAYER_HYBRIS_compat", null, null,
                 new String[] {});
 
         public final String id;
@@ -44,11 +43,12 @@ public final class SystemVulkanDriver {
         final String sessionLayers;
         final String gameLayers;
         final String extraLayerPath;
+        final String sessionBcTextures;
         private final String[] drmDrivers;
 
         Profile(String id, String gpuName, String halPath, boolean requiresRenderNode,
                 String dxvkPayload, String presentation, String sessionLayers,
-                String gameLayers, String extraLayerPath, String[] drmDrivers) {
+                String gameLayers, String extraLayerPath, String sessionBcTextures, String[] drmDrivers) {
             this.id = id;
             this.gpuName = gpuName;
             this.halPath = halPath;
@@ -58,6 +58,7 @@ public final class SystemVulkanDriver {
             this.sessionLayers = sessionLayers;
             this.gameLayers = gameLayers;
             this.extraLayerPath = extraLayerPath;
+            this.sessionBcTextures = sessionBcTextures;
             this.drmDrivers = drmDrivers;
         }
 
@@ -308,6 +309,12 @@ public final class SystemVulkanDriver {
         environment.add("VK_INSTANCE_LAYERS=" + selected.sessionLayers);
         environment.add("DROIDDECK_HYBRIS_SESSION_LAYERS=" + selected.sessionLayers);
         environment.add("DROIDDECK_HYBRIS_LAYERS=" + selected.gameLayers);
+        if (selected.sessionBcTextures != null) {
+            // The shared layer replaces Xclipse's vendor-only outer layer. Enable BC
+            // emulation only for managed games; nested compositors restore this policy.
+            environment.add("HYBRIS_BC_TEXTURES=" + selected.sessionBcTextures);
+            environment.add("DROIDDECK_HYBRIS_SESSION_BC_TEXTURES=" + selected.sessionBcTextures);
+        }
         if (selected.extraLayerPath != null)
             environment.add("DROIDDECK_HYBRIS_LAYER_PATH=" + selected.extraLayerPath);
         if (selected.dxvkPayload != null)

@@ -69,18 +69,35 @@ class SystemVulkanSelectionTest {
         }
     }
 
-    @Test fun xclipseRetainsItsLayerPayloadAndDrmProfile() {
+    @Test fun xclipseUsesSharedCompatibilityWithItsPayloadAndDrmProfile() {
         val env = mutableListOf<String>()
         SystemVulkanDriver.addEnvironment(File("/runtime"), "/vendor/lib64/hw/vulkan.samsung.so", "/dev/dri/renderD128", 37, env)
         assertTrue(env.contains("DROIDDECK_SYSTEM_VULKAN_GPU=xclipse"))
-        assertTrue(env.contains("VK_INSTANCE_LAYERS=VK_LAYER_DROIDDECK_xclipse"))
-        assertTrue(env.contains("DROIDDECK_HYBRIS_LAYERS=VK_LAYER_DROIDDECK_xclipse:VK_LAYER_HYBRIS_compat"))
-        assertTrue(env.contains("DROIDDECK_HYBRIS_LAYER_PATH=/usr/local/lib/droiddeck-xclipse"))
+        assertTrue(env.contains("VK_INSTANCE_LAYERS=VK_LAYER_HYBRIS_compat"))
+        assertTrue(env.contains("DROIDDECK_HYBRIS_SESSION_LAYERS=VK_LAYER_HYBRIS_compat"))
+        assertTrue(env.contains("DROIDDECK_HYBRIS_LAYERS=VK_LAYER_HYBRIS_compat"))
+        assertTrue(env.contains("VK_LAYER_PATH=/runtime/lib"))
+        assertFalse(env.any { it.startsWith("DROIDDECK_HYBRIS_LAYER_PATH=") })
+        assertFalse(env.any { it.contains("DROIDDECK_xclipse") || it.contains("droiddeck-xclipse") })
+        assertTrue(env.contains("HYBRIS_BC_TEXTURES=0"))
+        assertTrue(env.contains("DROIDDECK_HYBRIS_SESSION_BC_TEXTURES=0"))
         assertTrue(env.contains("DROIDDECK_HYBRIS_DXVK=dxvk-2.6.2"))
         assertTrue(env.contains("BL_POWERVR_RENDER_NODE=/dev/dri/renderD128"))
+        assertTrue(env.contains("BL_POWERVR_DRM_HANDLES=1"))
+        assertTrue(env.contains("BL_STEAM_GL_PRESENT=1"))
         assertTrue(env.contains("DROIDDECK_POWERVR_RUNTIME=/runtime"))
         assertThrows(IllegalStateException::class.java) {
             SystemVulkanDriver.addEnvironment(File("/runtime"), "/vendor/lib64/hw/vulkan.samsung.so", null, 37, mutableListOf())
+        }
+    }
+
+    @Test fun otherProfilesRetainTheirSessionBcPolicy() {
+        for (profile in listOf(SystemVulkanDriver.Profile.POWERVR, SystemVulkanDriver.Profile.MALI)) {
+            val env = mutableListOf<String>()
+            SystemVulkanDriver.addEnvironment(File("/runtime"), profile.halPath,
+                if (profile.requiresRenderNode) "/dev/dri/renderD128" else null, 37, env)
+            assertFalse(env.any { it.startsWith("HYBRIS_BC_TEXTURES=") })
+            assertFalse(env.any { it.startsWith("DROIDDECK_HYBRIS_SESSION_BC_TEXTURES=") })
         }
     }
 

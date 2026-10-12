@@ -11,6 +11,7 @@ GRAPHICS_KEYS = ("BL_STEAM_GL_PRESENT", "DISABLE_GAMESCOPE_WSI", "LIBGL_KOPPER_D
                  "DROIDDECK_SYSTEM_VULKAN_GPU", "DROIDDECK_SYSTEM_VULKAN_RUNTIME", "DROIDDECK_POWERVR_RUNTIME",
                  "DROIDDECK_SYSTEM_VULKAN_PRESENTATION", "DROIDDECK_SYSTEM_VULKAN_DXVK",
                  "DROIDDECK_HYBRIS_SESSION_LAYERS", "DROIDDECK_HYBRIS_LAYER_PATH",
+                 "DROIDDECK_HYBRIS_SESSION_BC_TEXTURES", "HYBRIS_BC_TEXTURES",
                  "VK_LAYER_PATH", "VK_INSTANCE_LAYERS", "WSI_X11_FORCE_SHM", "ENABLE_GAMESCOPE_WSI",
                  "VK_LOADER_LAYERS_DISABLE", "DISABLE_WSI_LAYER")
 
@@ -121,14 +122,16 @@ class SteamPresentationTest(unittest.TestCase):
                 result = self.launch("1", {
                     "DROIDDECK_SYSTEM_VULKAN_GPU": gpu, "DROIDDECK_SYSTEM_VULKAN_RUNTIME": "/runtime",
                     "DROIDDECK_SYSTEM_VULKAN_PRESENTATION": "native",
-                    "VK_LAYER_PATH": "/runtime/lib:/usr/local/lib/droiddeck-xclipse",
-                    "VK_INSTANCE_LAYERS": "VK_LAYER_DROIDDECK_xclipse",
+                    "VK_LAYER_PATH": "/runtime/lib", "VK_INSTANCE_LAYERS": "VK_LAYER_HYBRIS_compat",
+                    "DROIDDECK_HYBRIS_SESSION_LAYERS": "VK_LAYER_HYBRIS_compat",
+                    "DROIDDECK_HYBRIS_SESSION_BC_TEXTURES": "0", "HYBRIS_BC_TEXTURES": "0",
                 })
                 self.assertIn("-cef-use-angle=gl", result["args"])
                 self.assertIn("-cef-disable-gpu-compositing", result["args"])
                 self.assertTrue(result["path"].startswith("/usr/local/libexec/droiddeck-steam:"))
-                self.assertEqual(result["graphics"]["VK_LAYER_PATH"], "/runtime/lib:/usr/local/lib/droiddeck-xclipse")
-                self.assertEqual(result["graphics"]["VK_INSTANCE_LAYERS"], "VK_LAYER_DROIDDECK_xclipse")
+                self.assertEqual(result["graphics"]["VK_LAYER_PATH"], "/runtime/lib")
+                self.assertEqual(result["graphics"]["VK_INSTANCE_LAYERS"], "VK_LAYER_HYBRIS_compat")
+                self.assertEqual(result["graphics"]["HYBRIS_BC_TEXTURES"], "0")
                 self.assertIsNone(result["graphics"]["WSI_X11_FORCE_SHM"])
 
     def test_generic_runtime_takes_precedence_over_legacy_alias(self):

@@ -12,6 +12,7 @@ DESKTOP_GPU = Path(__file__).resolve().parents[1] / "linuxfs/desktop/droiddeck-g
 GRAPHICS_KEYS = ("DROIDDECK_SYSTEM_VULKAN_GPU", "DROIDDECK_SYSTEM_VULKAN_RUNTIME", "DROIDDECK_POWERVR_RUNTIME",
                  "DROIDDECK_SYSTEM_VULKAN_PRESENTATION", "DROIDDECK_SYSTEM_VULKAN_DXVK",
                  "DROIDDECK_HYBRIS_SESSION_LAYERS", "DROIDDECK_HYBRIS_LAYER_PATH",
+                 "DROIDDECK_HYBRIS_SESSION_BC_TEXTURES", "HYBRIS_BC_TEXTURES",
                  "VK_LAYER_PATH", "VK_INSTANCE_LAYERS", "WSI_X11_FORCE_SHM", "ENABLE_GAMESCOPE_WSI",
                  "VK_LOADER_LAYERS_DISABLE", "DISABLE_WSI_LAYER")
 
@@ -216,10 +217,66 @@ class DesktopGamescopeBackendTest(unittest.TestCase):
                 result, capture = self.launch("sdl", {
                     "DROIDDECK_SYSTEM_VULKAN_GPU": gpu, "DROIDDECK_SYSTEM_VULKAN_RUNTIME": "/runtime",
                     "DROIDDECK_SYSTEM_VULKAN_PRESENTATION": "native",
-                    "VK_LAYER_PATH": "/runtime/lib:/usr/local/lib/droiddeck-xclipse",
-                    "VK_INSTANCE_LAYERS": "VK_LAYER_DROIDDECK_xclipse", "WSI_X11_FORCE_SHM": "0",
+                    "DROIDDECK_HYBRIS_SESSION_LAYERS": "VK_LAYER_HYBRIS_compat",
+                    "DROIDDECK_HYBRIS_SESSION_BC_TEXTURES": "0", "HYBRIS_BC_TEXTURES": "0",
+                    "VK_LAYER_PATH": "/runtime/lib",
+                    "VK_INSTANCE_LAYERS": "VK_LAYER_HYBRIS_compat", "WSI_X11_FORCE_SHM": "0",
                 })
                 self.assertEqual(0, result.returncode, result.stderr)
-                self.assert_xwayland_application(capture)
-                for key in ("VK_LAYER_PATH", "VK_INSTANCE_LAYERS", "WSI_X11_FORCE_SHM"):
+                self.assertEqual("x11", capture["client"]["env"]["SDL_VIDEODRIVER"])
+                self.assertEqual(["demo", "one argument"], capture["client"]["args"])
+                self.assertIsNone(capture["graphics"]["WSI_X11_FORCE_SHM"])
+                self.assertEqual("0", capture["client"]["env"]["WSI_X11_FORCE_SHM"])
+                for key in ("VK_LAYER_PATH", "VK_INSTANCE_LAYERS", "HYBRIS_BC_TEXTURES"):
                     self.assertEqual(capture["graphics"][key], capture["client"]["env"][key])
+
+    def test_nested_native_xclipse_restores_session_but_preserves_game_client(self):
+        inherited = {
+            "DROIDDECK_SYSTEM_VULKAN_GPU": "xclipse", "DROIDDECK_SYSTEM_VULKAN_RUNTIME": "/runtime",
+            "DROIDDECK_SYSTEM_VULKAN_PRESENTATION": "native",
+            "DROIDDECK_HYBRIS_SESSION_LAYERS": "VK_LAYER_HYBRIS_compat",
+            "DROIDDECK_HYBRIS_SESSION_BC_TEXTURES": "0", "HYBRIS_BC_TEXTURES": "dxvk",
+            "VK_LAYER_PATH": "/runtime/wsi:/runtime/lib",
+            "VK_INSTANCE_LAYERS": "VK_LAYER_window_system_integration:VK_LAYER_HYBRIS_compat",
+            "ENABLE_GAMESCOPE_WSI": "0", "VK_LOADER_LAYERS_DISABLE": "*gamescope*",
+        }
+        result, capture = self.launch("sdl", inherited)
+        self.assertEqual(0, result.returncode, result.stderr)
+        self.assertEqual("wayland", capture["sdl"])
+        self.assertEqual("0", capture["graphics"]["HYBRIS_BC_TEXTURES"])
+        self.assertEqual("/runtime/lib", capture["graphics"]["VK_LAYER_PATH"])
+        self.assertEqual("VK_LAYER_HYBRIS_compat", capture["graphics"]["VK_INSTANCE_LAYERS"])
+        for key in ("WSI_X11_FORCE_SHM", "ENABLE_GAMESCOPE_WSI", "VK_LOADER_LAYERS_DISABLE"):
+            self.assertIsNone(capture["graphics"][key])
+        client = capture["client"]["env"]
+        for key in ("HYBRIS_BC_TEXTURES", "VK_LAYER_PATH", "VK_INSTANCE_LAYERS",
+                    "ENABLE_GAMESCOPE_WSI", "VK_LOADER_LAYERS_DISABLE"):
+            self.assertEqual(inherited[key], client[key])
+        self.assertNotIn("WSI_X11_FORCE_SHM", client)
+        self.assertEqual("x11", client["SDL_VIDEODRIVER"])
+        self.assertEqual(["demo", "one argument"], capture["client"]["args"])
+
+    def test_nested_session_bc_does_not_leak_into_unset_or_empty_client_policy(self):
+        for presentation in ("native", "x11-shm"):
+            for policy in (None, "", "dxvk"):
+                with self.subTest(presentation=presentation, policy=policy):
+                    inherited = {
+                        "DROIDDECK_SYSTEM_VULKAN_RUNTIME": "/runtime",
+                        "DROIDDECK_SYSTEM_VULKAN_PRESENTATION": presentation,
+                        "DROIDDECK_HYBRIS_SESSION_LAYERS": "VK_LAYER_HYBRIS_compat",
+                        "DROIDDECK_HYBRIS_SESSION_BC_TEXTURES": "0",
+                    }
+                    if policy is not None:
+                        inherited["HYBRIS_BC_TEXTURES"] = policy
+                    result, capture = self.launch("sdl", inherited)
+                    self.assertEqual(0, result.returncode, result.stderr)
+                    self.assertEqual("0", capture["graphics"]["HYBRIS_BC_TEXTURES"])
+                    client = capture["client"]["env"]
+                    self.assertEqual(policy, client.get("HYBRIS_BC_TEXTURES"))
+                    if presentation == "native":
+                        self.assertNotIn("VK_LAYER_PATH", client)
+                        self.assertNotIn("VK_INSTANCE_LAYERS", client)
+                    else:
+                        self.assertEqual("1", client["WSI_X11_FORCE_SHM"])
+                        self.assertEqual("/runtime/wsi:/runtime/lib", client["VK_LAYER_PATH"])
+                        self.assertEqual("VK_LAYER_window_system_integration:VK_LAYER_HYBRIS_compat", client["VK_INSTANCE_LAYERS"])

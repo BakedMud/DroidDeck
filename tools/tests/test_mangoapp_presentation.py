@@ -13,6 +13,7 @@ GRAPHICS_KEYS = (
     "DROIDDECK_SYSTEM_VULKAN_GPU", "DROIDDECK_SYSTEM_VULKAN_RUNTIME",
     "DROIDDECK_SYSTEM_VULKAN_PRESENTATION", "DROIDDECK_SYSTEM_VULKAN_DXVK",
     "DROIDDECK_HYBRIS_SESSION_LAYERS", "DROIDDECK_HYBRIS_LAYER_PATH",
+    "DROIDDECK_HYBRIS_SESSION_BC_TEXTURES", "HYBRIS_BC_TEXTURES",
     "DROIDDECK_POWERVR_RUNTIME", "VK_LAYER_PATH", "VK_INSTANCE_LAYERS",
     "WSI_X11_FORCE_SHM", "ENABLE_GAMESCOPE_WSI", "VK_LOADER_LAYERS_DISABLE",
     "DISABLE_WSI_LAYER", "XDG_SESSION_TYPE", "WAYLAND_DISPLAY", "LD_LIBRARY_PATH",
@@ -152,11 +153,13 @@ class MangoAppPresentationTest(unittest.TestCase):
                 graphics = self.launch({
                     "DROIDDECK_SYSTEM_VULKAN_GPU": gpu, "DROIDDECK_SYSTEM_VULKAN_RUNTIME": "/runtime",
                     "DROIDDECK_SYSTEM_VULKAN_PRESENTATION": "native",
-                    "VK_LAYER_PATH": "/runtime/lib:/usr/local/lib/droiddeck-xclipse",
-                    "VK_INSTANCE_LAYERS": "VK_LAYER_DROIDDECK_xclipse",
+                    "VK_LAYER_PATH": "/runtime/lib", "VK_INSTANCE_LAYERS": "VK_LAYER_HYBRIS_compat",
+                    "DROIDDECK_HYBRIS_SESSION_LAYERS": "VK_LAYER_HYBRIS_compat",
+                    "DROIDDECK_HYBRIS_SESSION_BC_TEXTURES": "0", "HYBRIS_BC_TEXTURES": "0",
                 })
-                self.assertEqual(graphics["VK_LAYER_PATH"], "/runtime/lib:/usr/local/lib/droiddeck-xclipse")
-                self.assertEqual(graphics["VK_INSTANCE_LAYERS"], "VK_LAYER_DROIDDECK_xclipse")
+                self.assertEqual(graphics["VK_LAYER_PATH"], "/runtime/lib")
+                self.assertEqual(graphics["VK_INSTANCE_LAYERS"], "VK_LAYER_HYBRIS_compat")
+                self.assertEqual(graphics["HYBRIS_BC_TEXTURES"], "0")
                 self.assertEqual(graphics["WSI_X11_FORCE_SHM"], "0")
 
 if __name__ == "__main__":

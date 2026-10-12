@@ -64,8 +64,6 @@ def required():
     paths += ['assets/linuxfs/i386/libfaultreport.so']
     paths += ['assets/linuxfs/usr/local/lib/droiddeck-msitools/' + name for name in
               ['msiinfo', 'cabextract', '7z', '7z.so', 'libmsi-1.0.so.0', 'libgsf-1.so.114', 'libgcab-1.0.so.0']]
-    paths += ['assets/linuxfs/usr/local/lib/droiddeck-xclipse/' + name for name in
-              ['libVkLayer_droiddeck_xclipse.so', 'VkLayer_droiddeck_xclipse.json']]
     paths += ['assets/linuxfs/usr/local/lib/mangoapp/' + name for name in
               ['mangoapp', 'libfmt.so.10', 'libspdlog.so.1.13', 'libglfw.so.3', 'libtraceevent.so.1', 'libtracefs.so.1']]
     for driver in ['linux-wine11', 'linux-wine11-systhread']:

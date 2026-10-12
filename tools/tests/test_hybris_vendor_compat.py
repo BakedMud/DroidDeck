@@ -7,6 +7,18 @@ import tempfile
 import unittest
 
 
+def vulkan_include():
+    override = os.environ.get("VULKAN_INCLUDE")
+    if override:
+        return Path(override)
+    # Distribution headers do not move with a virtualenv/toolcache interpreter.
+    # Termux's native headers live under the base interpreter's prefix instead.
+    for include in (Path("/usr/include"), Path(sys.base_prefix) / "include"):
+        if (include / "vulkan/vulkan.h").is_file():
+            return include
+    return Path("/usr/include")
+
+
 ROOT = Path(__file__).resolve().parents[2]
 PATCH = ROOT / "tools/hybris/patches/0002-vendor-compatibility.patch"
 HELPER = Path(__file__).with_name("hybris_vendor_compat_test.c")
@@ -44,7 +56,7 @@ class HybrisVendorCompatibilityTest(unittest.TestCase):
     def test_native_profile_and_workarounds(self):
         compiler = shutil.which(os.environ.get("CC", "cc"))
         self.assertIsNotNone(compiler, "a C compiler is required")
-        include = Path(os.environ.get("VULKAN_INCLUDE", str(Path(sys.prefix) / "include")))
+        include = vulkan_include()
         self.assertTrue((include / "vulkan/vulkan.h").is_file(),
                         "Vulkan headers are required")
         with tempfile.TemporaryDirectory(prefix="droiddeck-hybris-vendor-") as directory:
@@ -99,7 +111,9 @@ class HybrisVendorCompatibilityTest(unittest.TestCase):
     def test_device_feature_copy_preserves_input_and_fails_closed(self):
         compiler = shutil.which(os.environ.get("CC", "cc"))
         self.assertIsNotNone(compiler, "a C compiler is required")
-        include = Path(os.environ.get("VULKAN_INCLUDE", str(Path(sys.prefix) / "include")))
+        include = vulkan_include()
+        self.assertTrue((include / "vulkan/vulkan.h").is_file(),
+                        "Vulkan headers are required")
         with tempfile.TemporaryDirectory(prefix="droiddeck-hybris-features-") as directory:
             checkout = Path(directory) / "libhybris"
             source_value = os.environ.get("HYBRIS_VENDOR_SOURCE")

@@ -11,7 +11,8 @@ DroidDeck's `android_wlegl` / Android hardware buffer receiver.
 | DRM | Accessible, identifiable PowerVR render node | Accessible, identifiable `sgpu` render node | No DRM-node requirement or handle emulation |
 | Inner X11 presentation | Existing DRI3/Steam GL profile | Existing DRI3/Steam GL profile | Bundled X11 WSI with `WSI_X11_FORCE_SHM=1` |
 | Proton DXVK | Managed patched `dxvk` | Managed upstream `dxvk-2.6.2` for 128-byte push constants | User-selected Proton/DXVK; WineD3D preference preserved |
-| Session / game compatibility layers | compat / WSI + compat | Xclipse / WSI + Xclipse + compat | compat / WSI + compat |
+| Session / game compatibility layers | compat / WSI + compat | compat / WSI + compat | compat / WSI + compat |
+| Session / managed-game BC emulation | Existing policy / `dxvk` | `0` / `dxvk` | Existing policy / user-controlled |
 
 X11 layer settings are applied after the outer Gamescope launch, including direct
 program and desktop sessions. `droiddeck-gpu` restores the Wayland bridge settings
@@ -30,11 +31,14 @@ with a managed DXVK payload, or native presentation with a user-selected payload
 | `DROIDDECK_SYSTEM_VULKAN_PRESENTATION` | `native` preserves normal presentation; `x11-shm` enables the X11 client fallback |
 | `DROIDDECK_SYSTEM_VULKAN_DXVK` | `managed` uses the runtime wrapper/payload; `user` preserves Proton/DXVK/WineD3D choices |
 | `DROIDDECK_HYBRIS_SESSION_LAYERS` | Outer/session layer list, restored before launching a nested Gamescope |
+| `DROIDDECK_HYBRIS_SESSION_BC_TEXTURES` | Optional outer/session BC policy, restored before nested compositors; Xclipse sets `0` |
 
 `DROIDDECK_HYBRIS_LAYERS` separately specifies game compatibility layers;
 `DROIDDECK_HYBRIS_LAYER_PATH` adds their directory, and `DROIDDECK_HYBRIS_DXVK`
 names the managed DXVK payload. The X11 WSI layer is added only for inner clients.
-Xclipse's session uses its vendor layer alone; games also get BC compatibility.
+Xclipse uses the shared compatibility layer throughout. Its outer/session environment
+sets `HYBRIS_BC_TEXTURES=0`; managed game launches override it to `dxvk` in their
+own process environment, and nested compositors restore the session policy.
 Absent or empty capability fields retain older defaults: Mali uses `x11-shm`/`user`,
 and other system profiles use `native`/`managed`. The old
 `DROIDDECK_POWERVR_RUNTIME` alias remains available for PowerVR and Xclipse helpers.
@@ -49,21 +53,26 @@ Android compositor
 
 ## Runtime compatibility ownership
 
-The app currently loads the pinned libhybris runtime artifact and keeps the
-packaged Xclipse layer active. Source changes to HAL/ICD compatibility under
-`tools/hybris` do not replace that artifact: deployment requires rebuilding the
-runtime, validating it, and updating its pin and checksum. The Xclipse layer must
-remain active until the replacement runtime supplies its tested workarounds.
-The capability metadata above prepares common launch behavior without claiming
-that the native compatibility migration is already deployed.
+The app now selects the shared `VK_LAYER_HYBRIS_compat` layer for Xclipse and no
+longer stages or enables the standalone Xclipse layer. The runtime is pinned to
+[component release `78831b13`](https://github.com/wallentx/DroidDeck/releases/tag/hybris-78831b134c818e9d1077a8b73a11364c3d47d36d),
+built by [component CI](https://github.com/wallentx/DroidDeck/actions/runs/38223214145).
+`tools/powervr/release.json` records the verified archive and tree checksums, recipe
+inputs, producer commit, and upstream source revision.
 
-The native follow-up patch uses the existing split: common/ICD code prepares the
-selected Android HAL, while `VK_LAYER_HYBRIS_compat` handles Vulkan call and feature
-workarounds. BCn decoding and several SPIR-V transformations already exist in the
-pinned layer. Descriptor and dynamic-state compatibility is partial: filtering an
-unsupported path is not equivalent to implementing its emulation. A shared vendor
-mechanism does not establish support for every driver version or fix Mali's first
-frame by itself.
+Common/ICD code prepares the selected Android HAL, including the Xclipse shader
+compiler's bionic environment. The shared compatibility layer handles Vulkan call
+and feature workarounds, with Xclipse changes gated by the selected HAL and physical
+device. PowerVR and Mali retain their existing BC policy; Xclipse disables BC
+emulation in the outer/session path and enables its DXVK profile only for managed
+games. The 128-byte push-constant limit still selects DXVK 2.6.2.
+
+BCn decoding and several SPIR-V transformations already exist in the pinned layer.
+Descriptor and dynamic-state compatibility is partial: filtering an unsupported
+path is not equivalent to implementing its emulation. The native migration and
+component tests do not establish support for every driver version or fix Mali's
+first frame by themselves. Full APK CI and installed-device regressions remain
+separate validation gates.
 
 The component build is available through the existing APK workflow:
 
@@ -78,13 +87,11 @@ commit, build URL, archive/tree hashes, and exact recipe inputs. It does not pub
 the archive or modify `release.json`. The archive also records the build recipe
 and ships the original compiler manifest and patched source, including new files.
 
-After native review and a successful component build, publish that exact archive,
-verify its download, and update the `hybris` entry in `tools/powervr/release.json`.
-Until then, APK assembly intentionally rejects the changed recipe/patch stack.
-Only then replace the active standalone Xclipse layer with the shared layer. Its
-outer/session path must explicitly set `HYBRIS_BC_TEXTURES=0` to preserve the prior
-vendor-only behavior; managed game launches still select `HYBRIS_BC_TEXTURES=dxvk`.
-Full APK CI and device regressions follow that activation.
+For subsequent native changes, review and build the component, publish that exact
+archive, verify its download, and update the `hybris` entry in
+`tools/powervr/release.json`. APK assembly rejects a recipe or patch stack that no
+longer matches its pinned component. Preserve the separation between the Xclipse
+outer/session BC policy and the managed-game override when changing launch code.
 
 ## Pixel 8 Pro / Tensor G3 evidence
 

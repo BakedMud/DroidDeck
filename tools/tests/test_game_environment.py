@@ -82,12 +82,13 @@ class SystemGraphicsLaunchTest(unittest.TestCase):
             for key in ("FEX_TSOENABLED", "WINESERVER", "CUSTOM"):
                 self.assertEqual(result[key], env[key])
 
-    def test_xclipse_selection_adds_its_layers_layer_path_and_dxvk_payload(self):
+    def test_xclipse_uses_shared_compat_layer_and_game_bc_with_its_dxvk_payload(self):
         with tempfile.TemporaryDirectory() as tmp:
             runtime, _ = self.runtime(Path(tmp))
             env = {"DROIDDECK_POWERVR_RUNTIME": str(runtime), "STEAM_COMPAT_DATA_PATH": "/compatdata/42",
-                   "DROIDDECK_HYBRIS_LAYERS": "VK_LAYER_DROIDDECK_xclipse:VK_LAYER_HYBRIS_compat",
-                   "DROIDDECK_HYBRIS_LAYER_PATH": "/usr/local/lib/droiddeck-xclipse",
+                   "DROIDDECK_HYBRIS_LAYERS": "VK_LAYER_HYBRIS_compat",
+                   "DROIDDECK_HYBRIS_SESSION_LAYERS": "VK_LAYER_HYBRIS_compat",
+                   "DROIDDECK_HYBRIS_SESSION_BC_TEXTURES": "0", "HYBRIS_BC_TEXTURES": "0",
                    "DROIDDECK_HYBRIS_DXVK": "dxvk-2.6.2"}
             command = ["/proton", "waitforexitandrun", "game.exe"]
             # The selected payload is required like the default one.
@@ -101,8 +102,11 @@ class SystemGraphicsLaunchTest(unittest.TestCase):
             launch, result = MODULE["system_graphics_launch"](command, env)
             self.assertEqual(launch, [str(runtime / "run-proton.py"), *command])
             self.assertEqual(result["VK_INSTANCE_LAYERS"],
-                             "VK_LAYER_window_system_integration:VK_LAYER_DROIDDECK_xclipse:VK_LAYER_HYBRIS_compat")
-            self.assertEqual(result["VK_LAYER_PATH"], f"{runtime}/wsi:{runtime}/lib:/usr/local/lib/droiddeck-xclipse")
+                             "VK_LAYER_window_system_integration:VK_LAYER_HYBRIS_compat")
+            self.assertEqual(result["VK_LAYER_PATH"], f"{runtime}/wsi:{runtime}/lib")
+            self.assertEqual(result["HYBRIS_BC_TEXTURES"], "dxvk")
+            self.assertEqual(result["DROIDDECK_HYBRIS_SESSION_BC_TEXTURES"], "0")
+            self.assertEqual(env["HYBRIS_BC_TEXTURES"], "0")
             self.assertEqual(result["DROIDDECK_HYBRIS_DXVK"], "dxvk-2.6.2")
             generic = dict(env, DROIDDECK_SYSTEM_VULKAN_RUNTIME=str(runtime),
                            DROIDDECK_SYSTEM_VULKAN_GPU="xclipse",
@@ -155,6 +159,8 @@ class SystemGraphicsLaunchTest(unittest.TestCase):
                                    "DROIDDECK_SYSTEM_VULKAN_GPU": gpu,
                                    "DROIDDECK_SYSTEM_VULKAN_PRESENTATION": presentation,
                                    "DROIDDECK_SYSTEM_VULKAN_DXVK": dxvk,
+                                   "DROIDDECK_HYBRIS_LAYERS": "VK_LAYER_vendor:VK_LAYER_HYBRIS_compat",
+                                   "DROIDDECK_HYBRIS_LAYER_PATH": "/vendor layers",
                                    "STEAM_COMPAT_DATA_PATH": "/compatdata/42",
                                    "WSI_X11_FORCE_SHM": "0", "HYBRIS_BC_TEXTURES": "custom",
                                    "PROTON_USE_WINED3D": "1"}
@@ -166,6 +172,9 @@ class SystemGraphicsLaunchTest(unittest.TestCase):
                                              "1" if presentation == "x11-shm" else "0")
                             self.assertEqual(result["HYBRIS_BC_TEXTURES"], "dxvk" if dxvk == "managed" else "custom")
                             self.assertEqual(result.get("PROTON_USE_WINED3D"), None if dxvk == "managed" else "1")
+                            self.assertEqual(result["VK_INSTANCE_LAYERS"],
+                                             "VK_LAYER_window_system_integration:VK_LAYER_vendor:VK_LAYER_HYBRIS_compat")
+                            self.assertEqual(result["VK_LAYER_PATH"], f"{runtime}/wsi:{runtime}/lib:/vendor layers")
                             self.assertEqual(env, saved)
 
     def test_invalid_system_capabilities_fail_before_proton_exec(self):
