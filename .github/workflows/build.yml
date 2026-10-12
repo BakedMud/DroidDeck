@@ -16,6 +16,12 @@ on:
       - 'LICENSE'
       - '.gitignore'
   workflow_dispatch:
+    inputs:
+      component:
+        description: 'Build an APK or the libhybris component for review and release pinning'
+        type: choice
+        options: [apk, hybris]
+        default: apk
 
 permissions:
   contents: read
@@ -31,9 +37,36 @@ env:
   PRELOAD_CACHE_VERSION: v3
 
 jobs:
+  hybris:
+    name: Build libhybris component
+    if: github.event_name == 'workflow_dispatch' && inputs.component == 'hybris'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 90
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install build dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y podman patchelf zstd libvulkan-dev
+      - name: Test component validation
+        run: python3 -m unittest tools.tests.test_hybris_component_record tools.tests.test_powervr_runtime
+      - name: Build the patched runtime
+        run: bash tools/hybris/build_runtime.sh out/hybris
+      - name: Record component provenance and candidate release pin
+        env:
+          COMPONENT_URL: https://github.com/${{ github.repository }}/releases/download/hybris-${{ github.sha }}/runtime.tzst
+        run: python3 tools/hybris/component_record.py out/hybris/runtime.tzst --url "$COMPONENT_URL"
+      - uses: actions/upload-artifact@v4
+        with:
+          name: hybris-runtime-${{ github.sha }}
+          path: out/hybris/
+          if-no-files-found: error
+
   build:
     name: Build APK
-    if: ${{ github.event_name != 'pull_request' || !github.event.pull_request.draft }}
+    if: ${{ inputs.component != 'hybris' && (github.event_name != 'pull_request' || !github.event.pull_request.draft) }}
     runs-on: ubuntu-24.04
     timeout-minutes: 45
     outputs:

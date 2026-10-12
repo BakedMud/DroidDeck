@@ -72,6 +72,19 @@ def upstream_dxvk(version, architecture_of=lambda arch: arch):
 
 
 class PowerVRRuntimeTest(unittest.TestCase):
+    def test_new_hybris_patch_requires_a_rebuilt_component_pin(self):
+        patch = self.root / 'tools/hybris/patches/0002-vendor.patch'
+        patch.parent.mkdir(parents=True)
+        patch.write_text('a new native fix')
+        with self.assertRaisesRegex(ValueError, 'patch stack changed'):
+            runtime.load_release(self.root)
+
+    def test_removed_hybris_patch_requires_a_new_component_pin(self):
+        self.release['hybris']['recipe_inputs']['tools/hybris/patches/removed.patch'] = '0' * 64
+        (self.root / 'tools/powervr/release.json').write_text(json.dumps(self.release))
+        with self.assertRaisesRegex(ValueError, 'patch stack changed'):
+            runtime.load_release(self.root)
+
     def setUp(self):
         self.temporary = tempfile.TemporaryDirectory()
         self.addCleanup(self.temporary.cleanup)

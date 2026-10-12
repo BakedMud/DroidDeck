@@ -111,6 +111,13 @@ def load_release(root):
     release = json.loads((root / "tools/powervr/release.json").read_bytes())
     if release.get("format") != 1:
         raise ValueError("unsupported PowerVR release pins")
+    # Added patches are build inputs too: checking only the old pin's keys would
+    # otherwise silently keep shipping a component built without a new fix.
+    patches = {str(path.relative_to(root)) for path in (root / "tools/hybris/patches").glob("*.patch")}
+    pinned_patches = {name for name in release["hybris"]["recipe_inputs"]
+                      if name.startswith("tools/hybris/patches/") and name.endswith(".patch")}
+    if patches != pinned_patches:
+        raise ValueError("PowerVR component patch stack changed; update its release pin")
     # These identify the reviewed recipe, not a new attestation from the old
     # producer. The original build metadata is preserved inside the runtime.
     for component in [release["hybris"], *release["archives"]]:

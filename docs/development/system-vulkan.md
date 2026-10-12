@@ -10,7 +10,7 @@ DroidDeck's `android_wlegl` / Android hardware buffer receiver.
 | HAL under `/vendor/lib64/hw/` | `vulkan.powervr.so` | `vulkan.samsung.so` | `vulkan.mali.so` |
 | DRM | Accessible, identifiable PowerVR render node | Accessible, identifiable `sgpu` render node | No DRM-node requirement or handle emulation |
 | Inner X11 presentation | Existing DRI3/Steam GL profile | Existing DRI3/Steam GL profile | Bundled X11 WSI with `WSI_X11_FORCE_SHM=1` |
-| Proton DXVK | Managed patched `dxvk` | Managed patched `dxvk-2.6.2` for 128-byte push constants | User-selected Proton/DXVK; WineD3D preference preserved |
+| Proton DXVK | Managed patched `dxvk` | Managed upstream `dxvk-2.6.2` for 128-byte push constants | User-selected Proton/DXVK; WineD3D preference preserved |
 | Session / game compatibility layers | compat / WSI + compat | Xclipse / WSI + Xclipse + compat | compat / WSI + compat |
 
 X11 layer settings are applied after the outer Gamescope launch, including direct
@@ -56,6 +56,35 @@ runtime, validating it, and updating its pin and checksum. The Xclipse layer mus
 remain active until the replacement runtime supplies its tested workarounds.
 The capability metadata above prepares common launch behavior without claiming
 that the native compatibility migration is already deployed.
+
+The native follow-up patch uses the existing split: common/ICD code prepares the
+selected Android HAL, while `VK_LAYER_HYBRIS_compat` handles Vulkan call and feature
+workarounds. BCn decoding and several SPIR-V transformations already exist in the
+pinned layer. Descriptor and dynamic-state compatibility is partial: filtering an
+unsupported path is not equivalent to implementing its emulation. A shared vendor
+mechanism does not establish support for every driver version or fix Mali's first
+frame by itself.
+
+The component build is available through the existing APK workflow:
+
+```sh
+gh workflow run build.yml --repo wallentx/DroidDeck \
+  --ref wallentx/powervr-mali -f component=hybris
+```
+
+This selects an artifact-only libhybris job. It produces `runtime.tzst`, its
+checksum, and `hybris-component.json`, a candidate release pin with the producer
+commit, build URL, archive/tree hashes, and exact recipe inputs. It does not publish
+the archive or modify `release.json`. The archive also records the build recipe
+and ships the original compiler manifest and patched source, including new files.
+
+After native review and a successful component build, publish that exact archive,
+verify its download, and update the `hybris` entry in `tools/powervr/release.json`.
+Until then, APK assembly intentionally rejects the changed recipe/patch stack.
+Only then replace the active standalone Xclipse layer with the shared layer. Its
+outer/session path must explicitly set `HYBRIS_BC_TEXTURES=0` to preserve the prior
+vendor-only behavior; managed game launches still select `HYBRIS_BC_TEXTURES=dxvk`.
+Full APK CI and device regressions follow that activation.
 
 ## Pixel 8 Pro / Tensor G3 evidence
 

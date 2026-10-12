@@ -16,17 +16,24 @@ fetch() {
 }
 fetch https://github.com/taowen/libhybris.git "$HYBRIS_REVISION" "$work/libhybris"
 fetch https://github.com/taowen/arlinux-rootfs.git "$PROTOCOL_REVISION" "$work/rootfs"
+# The feature-chain regression compiles patched production source. Supply the
+# pinned checkout explicitly so component CI cannot silently skip this gate.
+HYBRIS_VENDOR_SOURCE="$work/libhybris" python3 -m unittest discover \
+  -s "$root/tools/tests" -p test_hybris_vendor_compat.py
 git -C "$work/libhybris" apply --check "$root/tools/hybris/powervr-hal-version.patch"
 git -C "$work/libhybris" apply "$root/tools/hybris/powervr-hal-version.patch"
 for patch in "$root"/tools/hybris/patches/*.patch; do
   git -C "$work/libhybris" apply --check "$patch"
   git -C "$work/libhybris" apply "$patch"
 done
+# Include new source files in the patch shipped with the runtime's licenses.
+git -C "$work/libhybris" add --intent-to-add .
 export ARLINUX_WSI_PROTOCOL_DIR="$work/rootfs/graphics-protocols"
 export CONTAINER_ENGINE=podman
 "$work/libhybris/tools/build-aarch64.sh" --out "$work/build"
 
 mkdir -p "$work/package/lib" "$work/package/licenses"
+python3 "$root/tools/hybris/component_record.py" --write-recipe "$work/package/build-recipe.json"
 cp -a "$work/build/install/usr/lib/hybris/." "$work/package/lib/"
 find "$work/package/lib" -name '*.la' -delete
 rm -rf "$work/package/lib/include" "$work/package/lib/pkgconfig" "$work/package/lib/bin"
