@@ -13,7 +13,7 @@ GRAPHICS_KEYS = ("BL_STEAM_GL_PRESENT", "DISABLE_GAMESCOPE_WSI", "LIBGL_KOPPER_D
                  "DROIDDECK_HYBRIS_SESSION_LAYERS", "DROIDDECK_HYBRIS_LAYER_PATH",
                  "DROIDDECK_HYBRIS_SESSION_BC_TEXTURES", "HYBRIS_BC_TEXTURES",
                  "VK_LAYER_PATH", "VK_INSTANCE_LAYERS", "WSI_X11_FORCE_SHM", "ENABLE_GAMESCOPE_WSI",
-                 "VK_LOADER_LAYERS_DISABLE", "DISABLE_WSI_LAYER")
+                 "VK_LOADER_LAYERS_DISABLE", "DISABLE_WSI_LAYER", "SDL_FRAMEBUFFER_ACCELERATION")
 
 
 class SteamPresentationTest(unittest.TestCase):
@@ -99,7 +99,8 @@ class SteamPresentationTest(unittest.TestCase):
                 self.assertIsNone(result["graphics"]["DISABLE_WSI_LAYER"])
                 self.assertIsNone(result["disable"])
                 self.assertIsNone(result["kopper"])
-                self.assertFalse(result["path"].startswith("/usr/local/libexec/droiddeck-steam:"))
+                self.assertTrue(result["path"].startswith("/usr/local/libexec/droiddeck-steam:"))
+                self.assertIsNone(result["graphics"]["SDL_FRAMEBUFFER_ACCELERATION"])
 
     def test_explicit_shm_uses_vulkan_and_keeps_vendor_layers(self):
         result = self.launch("1", {
@@ -110,7 +111,8 @@ class SteamPresentationTest(unittest.TestCase):
         })
         self.assertIn("-cef-use-angle=vulkan", result["args"])
         self.assertNotIn("-cef-disable-gpu-compositing", result["args"])
-        self.assertFalse(result["path"].startswith("/usr/local/libexec/droiddeck-steam:"))
+        self.assertTrue(result["path"].startswith("/usr/local/libexec/droiddeck-steam:"))
+        self.assertIsNone(result["graphics"]["SDL_FRAMEBUFFER_ACCELERATION"])
         self.assertEqual(result["graphics"]["VK_LAYER_PATH"], "/runtime/wsi:/runtime/lib:/vendor-layer")
         self.assertEqual(result["graphics"]["VK_INSTANCE_LAYERS"],
                          "VK_LAYER_window_system_integration:VK_LAYER_vendor_session")
@@ -151,6 +153,18 @@ class SteamPresentationTest(unittest.TestCase):
                 self.assertEqual(result["graphics"]["VK_LAYER_PATH"], "custom/layers")
                 self.assertEqual(result["graphics"]["VK_INSTANCE_LAYERS"], "custom_layer")
                 self.assertEqual(result["graphics"]["WSI_X11_FORCE_SHM"], "0")
+                self.assertFalse(result["path"].startswith("/usr/local/libexec/droiddeck-steam:"))
+
+    def test_shm_without_runtime_and_explicit_native_keep_default_path(self):
+        for runtime, presentation in (("", "x11-shm"), ("/runtime", "native")):
+            with self.subTest(runtime=runtime, presentation=presentation):
+                result = self.launch(inherited={
+                    "DROIDDECK_SYSTEM_VULKAN_GPU": "mali", "DROIDDECK_SYSTEM_VULKAN_RUNTIME": runtime,
+                    "DROIDDECK_SYSTEM_VULKAN_PRESENTATION": presentation,
+                    "SDL_FRAMEBUFFER_ACCELERATION": "1",
+                })
+                self.assertFalse(result["path"].startswith("/usr/local/libexec/droiddeck-steam:"))
+                self.assertEqual(result["graphics"]["SDL_FRAMEBUFFER_ACCELERATION"], "1")
 
     def test_mali_client_layers_do_not_reach_gamescope_wayland(self):
         source = SESSION.read_text()

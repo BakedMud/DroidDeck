@@ -829,6 +829,7 @@ BUSCONF
     bl_steam_angle=vulkan
     bl_steam_presentation=()
     if [ "$bl_system_presentation" = x11-shm ] && [ -n "$bl_system_runtime" ]; then
+      bl_steam_path="/usr/local/libexec/droiddeck-steam:$PATH"
       echo "== steam: system Vulkan uses X11 shared-memory presentation"
     elif [ "${BL_STEAM_GL_PRESENT:-}" = 1 ]; then
       bl_steam_path="/usr/local/libexec/droiddeck-steam:$PATH"
