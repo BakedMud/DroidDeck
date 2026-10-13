@@ -81,7 +81,9 @@ jobs:
         if: inputs.component == 'dxvk-mali'
         with:
           name: dxvk-mali-${{ github.sha }}
-          path: out/dxvk-mali/
+          path: |
+            out/dxvk-mali/dxvk-mali-payloads.tar.zst
+            out/dxvk-mali/dxvk-mali-payloads.SHA256SUMS
           if-no-files-found: error
 
   build:

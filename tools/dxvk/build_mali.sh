@@ -52,6 +52,7 @@ EOF
 
 check_payload() {
   local payload=$1
+  test -x "$payload/run-proton.py" || die "managed payload wrapper is not executable: $payload/run-proton.py"
   mkdir -p "$payload/provenance"
   python3 - "$payload" "$toolchain/llvm-objdump" "$payload/provenance/pe-imports.json" <<'PY'
 from pathlib import Path
@@ -125,7 +126,7 @@ write_payload_metadata() {
   local label=$1 source_epoch
   local payload="$out/$label"
   mkdir -p "$payload/dxvk-mali" "$payload/crossfiles"
-  cp "$root/tools/hybris/run-proton.py" "$payload/run-proton.py"
+  install -m 0755 "$root/tools/hybris/run-proton.py" "$payload/run-proton.py"
   cp -a "$crossfiles/." "$payload/crossfiles/"
   cp "$source/LICENSE" "$payload/LICENSE"
   printf '%s\n' "$DXVK_REVISION" > "$payload/source-commit"
@@ -175,6 +176,18 @@ i386-windows	i686-w64-mingw32	x86	x86
 x86_64-windows	x86_64-w64-mingw32	x86_64	x86_64
 aarch64-windows	arm64ec-w64-mingw32	aarch64	aarch64
 EOF
+}
+
+package_payloads() {
+  local archive="$out/dxvk-mali-payloads.tar.zst"
+  # upload-artifact normalizes file modes. Keep both payloads in one tarball so
+  # run-proton.py remains executable after a maintainer downloads and extracts it.
+  tar --sort=name --mtime="@${SOURCE_DATE_EPOCH:?}" --owner=0 --group=0 --numeric-owner \
+    --zstd -cf "$archive" -C "$out" baseline experimental
+  (
+    cd "$out"
+    sha256sum "$(basename "$archive")" > dxvk-mali-payloads.SHA256SUMS
+  )
 }
 
 inside_container() {
@@ -231,6 +244,7 @@ inside_container() {
   stamp_version "$DXVK_MALI_BASE_VERSION-droiddeck-experimental"
   build_payload experimental
   write_payload_metadata experimental
+  package_payloads
 }
 
 if [ "${1:-}" = --inside-container ]; then
