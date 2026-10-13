@@ -18,9 +18,9 @@ on:
   workflow_dispatch:
     inputs:
       component:
-        description: 'Build an APK or the libhybris component for review and release pinning'
+        description: 'Build an APK, libhybris component, or experimental Mali DXVK component for review'
         type: choice
-        options: [apk, hybris]
+        options: [apk, hybris, dxvk-mali]
         default: apk
 
 permissions:
@@ -38,8 +38,8 @@ env:
 
 jobs:
   hybris:
-    name: Build libhybris component
-    if: github.event_name == 'workflow_dispatch' && inputs.component == 'hybris'
+    name: ${{ inputs.component == 'dxvk-mali' && 'Build experimental Mali DXVK component' || 'Build libhybris component' }}
+    if: github.event_name == 'workflow_dispatch' && (inputs.component == 'hybris' || inputs.component == 'dxvk-mali')
     runs-on: ubuntu-24.04
     timeout-minutes: 90
     permissions:
@@ -51,22 +51,42 @@ jobs:
           sudo apt-get update
           sudo apt-get install -y podman patchelf zstd libvulkan-dev
       - name: Test component validation
-        run: python3 -m unittest tools.tests.test_hybris_component_record tools.tests.test_powervr_runtime
+        run: |
+          set -euo pipefail
+          python3 -m unittest \
+            tools.tests.test_hybris_component_record \
+            tools.tests.test_powervr_runtime \
+            tools.tests.test_proton_wrapper
+          if [ "${{ inputs.component }}" = dxvk-mali ]; then
+            python3 -m unittest tools.tests.test_game_environment
+          fi
       - name: Build the patched runtime
+        if: inputs.component == 'hybris'
         run: bash tools/hybris/build_runtime.sh out/hybris
       - name: Record component provenance and candidate release pin
+        if: inputs.component == 'hybris'
         env:
           COMPONENT_URL: https://github.com/${{ github.repository }}/releases/download/hybris-${{ github.sha }}/runtime.tzst
         run: python3 tools/hybris/component_record.py out/hybris/runtime.tzst --url "$COMPONENT_URL"
+      - name: Build baseline and experimental Mali DXVK payloads
+        if: inputs.component == 'dxvk-mali'
+        run: bash tools/dxvk/build_mali.sh out/dxvk-mali
       - uses: actions/upload-artifact@v4
+        if: inputs.component == 'hybris'
         with:
           name: hybris-runtime-${{ github.sha }}
           path: out/hybris/
           if-no-files-found: error
+      - uses: actions/upload-artifact@v4
+        if: inputs.component == 'dxvk-mali'
+        with:
+          name: dxvk-mali-${{ github.sha }}
+          path: out/dxvk-mali/
+          if-no-files-found: error
 
   build:
     name: Build APK
-    if: ${{ inputs.component != 'hybris' && (github.event_name != 'pull_request' || !github.event.pull_request.draft) }}
+    if: ${{ (github.event_name != 'workflow_dispatch' || inputs.component == 'apk') && (github.event_name != 'pull_request' || !github.event.pull_request.draft) }}
     runs-on: ubuntu-24.04
     timeout-minutes: 45
     outputs:
