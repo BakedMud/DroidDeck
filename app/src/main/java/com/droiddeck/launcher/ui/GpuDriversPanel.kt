@@ -91,8 +91,6 @@ class GpuDriversState(
     /** Only runtimes with a compatible bundled DXVK own component selection. */
     val runtimeManagedDxvk: Boolean = false,
     val systemDriverName: String = "",
-    val experimentalMaliAvailable: Boolean = false,
-    val experimentalMaliDxvk: Boolean = false,
     val pairs: List<PairRow> = emptyList(),
     /** The pair key being installed, and how far along (-1 = unknown). */
     val busy: String? = null,
@@ -117,7 +115,6 @@ class GpuDriversState(
 
 class GpuDriversActions(
     val onAuto: (Boolean) -> Unit = {},
-    val onExperimentalMaliDxvk: (Boolean) -> Unit = {},
     val onPair: (String) -> Unit = {},
     val onRefresh: () -> Unit = {},
     val onSelectLinux: (String) -> Unit = {},

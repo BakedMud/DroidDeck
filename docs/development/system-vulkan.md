@@ -145,21 +145,19 @@ This is a bounded test;
 it does not establish a full race, long-run stability, broad compatibility,
 robustness2 conformance, or coverage of every rejection guard.
 
-The APK now bundles the verified `15dc` experimental component through the
-checksum-pinned PowerVR assembler. On Mali, open **Components > GPU drivers** and
-enable **Experimental Mali DXVK** before starting a session. It is off by default;
-the normal Mali profile keeps its DXVK choices editable until enabled. The switch
-selects `dxvk-mali` with `DXVK_MALI_COMPAT=1`, managed game DXVK and the existing
-X11 SHM presentation. It does not change other GPU profiles. The strict DXVK driver
-identity and unsupported-feature checks remain active, so other Mali drivers and
-some games can still be rejected. The setting cannot change during a session.
-
+The APK bundles the verified `15dc` experimental component through the
+checksum-pinned PowerVR assembler. **GPU drivers > Auto** selects the matching
+system Vulkan driver and bundled DXVK for PowerVR, Xclipse and Mali. Mali selects
+`dxvk-mali` with `DXVK_MALI_COMPAT=1`, managed game DXVK and its existing X11 SHM
+presentation automatically; there is no separate Mali opt-in switch or preference.
+The existing Manual driver controls remain available. The strict DXVK driver
+identity and unsupported-feature checks remain active.
 The published component contains the same fifteen i386, x86_64 and ARM64X DLLs
 verified in the device test above, plus source, license, patches and producer
 provenance. Assembly and launch both reject plain ARM64 DLLs in this payload.
 
 
-The integrated `29a3a4e8` 0.4.0 APK was then installed as an update on the same
+The earlier opt-in `29a3a4e8` 0.4.0 APK was installed as an update on the same
 Pixel 8 Pro. The visible switch started Off and was enabled through the GPU
 page; Steam reached READY and Old School Rally launched normally in two sessions,
 without manual component staging or per-game overrides. All fifteen installed
@@ -171,7 +169,9 @@ A 19.97-second driving capture sampled HUD readings of 61 and 55 FPS; the user
 reported 60 FPS. This is a bounded observation, not a performance benchmark or
 long-run stability result. Both environment-file hashes, the COMPATIBILITY FEX
 preset, global DXVK logging and device stay-awake settings remained unchanged.
-The experimental option was left enabled at the user's request.
+The earlier switch was left enabled at the user's request; the current Mali Auto
+profile always selects that working path and no longer consults the retired
+preference.
 
 ## Related implementation discussion
 

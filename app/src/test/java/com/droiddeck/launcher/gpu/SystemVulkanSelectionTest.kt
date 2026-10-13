@@ -101,9 +101,9 @@ class SystemVulkanSelectionTest {
         }
     }
 
-    @Test fun experimentalMaliSelectsManagedPayloadWithoutChangingPresentation() {
+    @Test fun maliAutomaticallySelectsManagedPayloadWithoutChangingPresentation() {
         val env = mutableListOf<String>()
-        SystemVulkanDriver.addEnvironment(File("/runtime"), "/vendor/lib64/hw/vulkan.mali.so", null, 37, env, true)
+        SystemVulkanDriver.addEnvironment(File("/runtime"), "/vendor/lib64/hw/vulkan.mali.so", null, 37, env)
         assertTrue(env.contains("DROIDDECK_HYBRIS_DXVK=dxvk-mali"))
         assertTrue(env.contains("DXVK_MALI_COMPAT=1"))
         assertTrue(env.contains("DROIDDECK_SYSTEM_VULKAN_DXVK=managed"))
@@ -112,9 +112,9 @@ class SystemVulkanSelectionTest {
         assertFalse(env.any { it.startsWith("DROIDDECK_POWERVR_RUNTIME=") })
     }
 
-    @Test fun experimentalMaliPreferenceDoesNotChangeOtherProfiles() {
+    @Test fun xclipseAutomaticProfileDoesNotEnableMaliCompatibility() {
         val env = mutableListOf<String>()
-        SystemVulkanDriver.addEnvironment(File("/runtime"), "/vendor/lib64/hw/vulkan.samsung.so", "/dev/dri/renderD128", 37, env, true)
+        SystemVulkanDriver.addEnvironment(File("/runtime"), "/vendor/lib64/hw/vulkan.samsung.so", "/dev/dri/renderD128", 37, env)
         assertTrue(env.contains("DROIDDECK_HYBRIS_DXVK=dxvk-2.6.2"))
         assertFalse(env.any { it.startsWith("DXVK_MALI_COMPAT=") })
     }
