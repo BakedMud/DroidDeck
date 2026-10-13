@@ -158,6 +158,21 @@ The published component contains the same fifteen i386, x86_64 and ARM64X DLLs
 verified in the device test above, plus source, license, patches and producer
 provenance. Assembly and launch both reject plain ARM64 DLLs in this payload.
 
+
+The integrated `29a3a4e8` 0.4.0 APK was then installed as an update on the same
+Pixel 8 Pro. The visible switch started Off and was enabled through the GPU
+page; Steam reached READY and Old School Rally launched normally in two sessions,
+without manual component staging or per-game overrides. All fifteen installed
+runtime DLLs and the four game-prefix DLLs matched the APK/component hashes.
+Fresh logs identified the enabled Mali profile and D3D11 feature level 11_0,
+with the actual game mapping the bundled compatibility layer and Mali HAL.
+Intro, interactive menus, race rendering and user-controlled driving worked.
+A 19.97-second driving capture sampled HUD readings of 61 and 55 FPS; the user
+reported 60 FPS. This is a bounded observation, not a performance benchmark or
+long-run stability result. Both environment-file hashes, the COMPATIBILITY FEX
+preset, global DXVK logging and device stay-awake settings remained unchanged.
+The experimental option was left enabled at the user's request.
+
 ## Related implementation discussion
 
 All 21 comments available on [DroidDeck issue #165](https://github.com/Droid-Deck/DroidDeck/issues/165)
