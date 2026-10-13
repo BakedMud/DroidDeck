@@ -3,10 +3,11 @@
 #include <stdlib.h>
 #include <string.h>
 
-static int virtual_bc = 1;
-int hybris_clip_active(VkPhysicalDevice physical) { return 0; }
+static int clip = 1;
+static int full_bc;
+int hybris_clip_active(VkPhysicalDevice physical) { return clip; }
 int hybris_vertex_stores_active(VkPhysicalDevice physical) { return 0; }
-int hybris_vendor_xclipse_bc(VkPhysicalDevice physical) { return virtual_bc; }
+int hybris_vendor_full_bc_feature(VkPhysicalDevice physical) { return full_bc; }
 void *hybris_scaled_alloc(const VkAllocationCallbacks *allocator, size_t size,
     VkSystemAllocationScope scope) { return calloc(1, size); }
 void hybris_scaled_free(const VkAllocationCallbacks *allocator, void *memory) { free(memory); }
@@ -16,16 +17,19 @@ int main(void)
     VkPhysicalDevice physical = (VkPhysicalDevice)1;
     struct hybris_device_features filtered;
 
-    VkPhysicalDeviceFeatures legacy = {.textureCompressionBC = VK_TRUE};
+    VkPhysicalDeviceFeatures legacy = {
+        .shaderClipDistance = VK_TRUE, .textureCompressionBC = VK_TRUE};
     VkDeviceCreateInfo legacy_info = {.sType = VK_STRUCTURE_TYPE_DEVICE_CREATE_INFO,
         .pEnabledFeatures = &legacy};
     assert(hybris_device_features_prepare(physical, &legacy_info, NULL, &filtered) == VK_SUCCESS);
     assert(filtered.info.pEnabledFeatures != &legacy);
-    assert(!filtered.info.pEnabledFeatures->textureCompressionBC && legacy.textureCompressionBC);
+    assert(!filtered.info.pEnabledFeatures->shaderClipDistance);
+    assert(filtered.info.pEnabledFeatures->textureCompressionBC &&
+        legacy.shaderClipDistance && legacy.textureCompressionBC);
     hybris_device_features_release(&filtered, NULL);
 
     VkPhysicalDeviceFeatures2 features = {.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_FEATURES_2,
-        .features.textureCompressionBC = VK_TRUE};
+        .features = {.shaderClipDistance = VK_TRUE, .textureCompressionBC = VK_TRUE}};
     VkPhysicalDeviceTimelineSemaphoreFeatures timeline = {
         .sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_TIMELINE_SEMAPHORE_FEATURES,
         .pNext = &features, .timelineSemaphore = VK_TRUE};
@@ -39,7 +43,7 @@ int main(void)
     const VkPhysicalDeviceFeatures2 *copied =
         (const VkPhysicalDeviceFeatures2 *)first->pNext;
     assert(copied->sType == VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_FEATURES_2);
-    assert(!copied->features.textureCompressionBC);
+    assert(!copied->features.shaderClipDistance && copied->features.textureCompressionBC);
     assert(!memcmp(&timeline, &timeline_before, sizeof(timeline)));
     assert(!memcmp(&features, &features_before, sizeof(features)));
     hybris_device_features_release(&filtered, NULL);
@@ -52,7 +56,7 @@ int main(void)
     assert(future.pNext == &features && future.value == 7);
     assert(!memcmp(&features, &features_before, sizeof(features)));
 
-    virtual_bc = 0;
+    clip = 0;
     assert(hybris_device_features_prepare(physical, &legacy_info, NULL, &filtered) == VK_SUCCESS);
     assert(filtered.info.pEnabledFeatures == &legacy);
     hybris_device_features_release(&filtered, NULL);

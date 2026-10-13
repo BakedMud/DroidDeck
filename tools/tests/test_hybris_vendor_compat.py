@@ -53,6 +53,14 @@ def file_diff(patch, name):
 
 
 class HybrisVendorCompatibilityTest(unittest.TestCase):
+    def test_explicit_hal_environment_is_prepared_before_dlopen(self):
+        icd_patch = file_diff(PATCH, "hybris/vulkan/icd/icd.c")
+        explicit = icd_patch.index("if (path && path[0])")
+        prepare = icd_patch.index("hybris_vendor_compat_prepare_vulkan_hal(path)")
+        namespace_setup = icd_patch.index("With Android's generated namespace config")
+        self.assertLess(explicit, prepare)
+        self.assertLess(prepare, namespace_setup)
+
     def test_native_profile_and_workarounds(self):
         compiler = shutil.which(os.environ.get("CC", "cc"))
         self.assertIsNotNone(compiler, "a C compiler is required")
@@ -107,6 +115,15 @@ class HybrisVendorCompatibilityTest(unittest.TestCase):
             ran = subprocess.run([str(program)], capture_output=True, text=True, timeout=30)
             self.assertEqual(ran.returncode, 0, ran.stdout + ran.stderr)
             self.assertIn("hybris vendor compatibility ok", ran.stdout)
+            preserved = subprocess.run([str(program), "preinitialized"],
+                                       capture_output=True, text=True, timeout=30)
+            self.assertEqual(preserved.returncode, 0,
+                             preserved.stdout + preserved.stderr)
+            self.assertIn("hybris native environment preserved", preserved.stdout)
+            retried = subprocess.run([str(program), "retry"],
+                                     capture_output=True, text=True, timeout=30)
+            self.assertEqual(retried.returncode, 0, retried.stdout + retried.stderr)
+            self.assertIn("hybris environment preparation retried", retried.stdout)
 
     def test_device_feature_copy_preserves_input_and_fails_closed(self):
         compiler = shutil.which(os.environ.get("CC", "cc"))
@@ -151,7 +168,7 @@ class HybrisVendorCompatibilityTest(unittest.TestCase):
                 for name, declaration in {
                     "vertex_stores.h": "int hybris_vertex_stores_active(VkPhysicalDevice);",
                     "clip_distance.h": "int hybris_clip_active(VkPhysicalDevice);",
-                    "vendor_compat.h": "int hybris_vendor_xclipse_bc(VkPhysicalDevice);",
+                    "vendor_compat.h": "int hybris_vendor_full_bc_feature(VkPhysicalDevice);",
                     "scaled_vertex.h": ("void *hybris_scaled_alloc(const VkAllocationCallbacks *, size_t, "
                         "VkSystemAllocationScope); void hybris_scaled_free(const VkAllocationCallbacks *, void *);"),
                 }.items():
