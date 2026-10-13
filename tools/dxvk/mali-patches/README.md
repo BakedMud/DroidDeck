@@ -7,8 +7,15 @@ Apply these patches after `tools/dxvk/patches/*.patch` to the revision in
 | Property | Required value |
 | --- | --- |
 | vendorID | `0x13b5` |
-| deviceID | `0xb8a20000` |
+| deviceID | Native `0xb8a20000`, or Wine-visible `0x00000000` with exact device name `Mali-G715` |
 | driverVersion | `0x0d803000` |
+
+The Wine-visible zero is specific to pinned Wine commit
+`e60892cc2398b0a83c332a2078c7b85e47bdb42b`: `dlls/win32u/vulkan.c`
+passes Vulkan IDs through `struct pci_id`, whose `vendor` and `device` fields
+are `UINT16` in `include/wine/gdi_driver.h`. The Mali device ID's low 16 bits
+are zero. The zero-ID path therefore also requires the exact `Mali-G715` name;
+the opt-in, vendor, and driver-version checks remain mandatory.
 
 Only `fillModeNonSolid`, `multiViewport`, `shaderCullDistance`, and
 `robustBufferAccess2` become optional. Enabled Vulkan feature bits remain equal
