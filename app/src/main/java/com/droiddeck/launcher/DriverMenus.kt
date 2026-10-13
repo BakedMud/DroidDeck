@@ -67,6 +67,7 @@ internal class DriverMenus(private val activity: Activity, private val ui: Handl
         linuxDownloads = linuxDownloads, androidDownloads = androidDownloads, canRestoreBundled = canRestoreBundled,
         activeBundle = activeBundle, powerVr = gpu.family == GpuInfo.Family.POWERVR,
         systemPowerVr = SystemVulkanDriver.usesDefault(linuxSelected),
+        canImportDrivers = com.droiddeck.launcher.core.DeviceSupport.adreno(),
     )
     var androidRows by mutableStateOf<List<DriverRow>>(emptyList())
     var androidSelected by mutableStateOf("")
@@ -79,7 +80,7 @@ internal class DriverMenus(private val activity: Activity, private val ui: Handl
             DriverRow(id, it.label, activity.getString(if (linux) R.string.drivers_bundle_sets_display else R.string.drivers_bundle_sets_runtime), true, DriverRow.BUNDLE)
         }
         linuxRows = LinuxVulkanDriver.optionValues(activity).map { id ->
-            if (id.isEmpty()) DriverRow("", activity.getString(if (gpu.family == GpuInfo.Family.POWERVR) R.string.gpu_system_powervr else R.string.gpu_runtime_default), activity.getString(R.string.drivers_runtime_builtin), false)
+            if (id.isEmpty()) DriverRow("", activity.getString(if (gpu.family == GpuInfo.Family.POWERVR) R.string.gpu_system_powervr else R.string.gpu_runtime_default), activity.getString(if (SystemVulkanDriver.usesDefault(id)) R.string.drivers_system_vulkan else R.string.drivers_runtime_builtin), false)
             else bundleRow(id, linux = true) ?: DriverRow(
                 id, lm.getDriverName(id),
                 listOfNotNull(

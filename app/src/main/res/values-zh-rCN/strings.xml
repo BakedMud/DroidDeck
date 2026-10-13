@@ -385,10 +385,10 @@
     <string name="common_size_mb">%1$.1f MB</string>
     <string name="comp_runtime_driver">运行时驱动</string>
     <string name="comp_runtime_driver_hint">由 Steam、游戏和桌面使用。将在下次会话生效。</string>
-    <string name="comp_import_turnip">导入 Turnip zip 包…</string>
+    <string name="comp_import_turnip">导入运行时驱动 zip…</string>
     <string name="comp_display_driver">显示驱动</string>
     <string name="comp_display_driver_hint">在两种模式下都将帧绘制到屏幕。重启应用以生效。</string>
-    <string name="comp_import_adrenotools">导入 AdrenoTools zip 包…</string>
+    <string name="comp_import_adrenotools">导入显示驱动 zip…</string>
     <string name="comp_never">从未</string>
     <string name="comp_nightlies_checked">Nightlies 检查时间：%1$s</string>
     <string name="comp_title">组件</string>
@@ -1165,8 +1165,8 @@
     <string name="drivers_not_checked">尚未检查 — 点按刷新以查找新驱动</string>
     <string name="drivers_bundle_sets_display">Android + Linux：同时设置显示驱动</string>
     <string name="drivers_bundle_sets_runtime">Android + Linux：同时设置运行时驱动</string>
-    <string name="drivers_runtime_builtin">运行时内置的 Turnip</string>
-    <string name="drivers_system_vulkan">系统 Vulkan：没有适用于此 GPU 的内置构建</string>
+    <string name="drivers_runtime_builtin">运行时内置</string>
+    <string name="drivers_system_vulkan">使用手机的系统 Vulkan 驱动</string>
     <string name="drivers_bundled">%1$s（内置）</string>
     <string name="drivers_manual">手动</string>
 

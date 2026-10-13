@@ -385,10 +385,10 @@
     <string name="common_size_mb">%1$.1f MB</string>
     <string name="comp_runtime_driver">런타임 드라이버</string>
     <string name="comp_runtime_driver_hint">Steam, 게임 및 데스크톱에서 사용됩니다. 다음 세션에 적용됩니다.</string>
-    <string name="comp_import_turnip">Turnip zip 가져오기…</string>
+    <string name="comp_import_turnip">런타임 드라이버 zip 가져오기…</string>
     <string name="comp_display_driver">디스플레이 드라이버</string>
     <string name="comp_display_driver_hint">두 모드 모두에서 화면 출력을 담당합니다. 앱을 다시 시작한 후 적용됩니다.</string>
-    <string name="comp_import_adrenotools">AdrenoTools zip 가져오기…</string>
+    <string name="comp_import_adrenotools">디스플레이 드라이버 zip 가져오기…</string>
     <string name="comp_never">없음</string>
     <string name="comp_nightlies_checked">Nightlies 확인 시각 %1$s</string>
     <string name="comp_title">구성 요소</string>
@@ -1165,8 +1165,8 @@
     <string name="drivers_not_checked">아직 확인하지 않음 - 새로 고침을 탭하여 새 드라이버를 찾으세요</string>
     <string name="drivers_bundle_sets_display">Android + Linux: 디스플레이 드라이버도 함께 설정</string>
     <string name="drivers_bundle_sets_runtime">Android + Linux: 런타임 드라이버도 함께 설정</string>
-    <string name="drivers_runtime_builtin">런타임 내장 Turnip</string>
-    <string name="drivers_system_vulkan">시스템 Vulkan: 이 GPU용 내장 빌드 없음</string>
+    <string name="drivers_runtime_builtin">런타임에 내장됨</string>
+    <string name="drivers_system_vulkan">휴대전화의 시스템 Vulkan 드라이버 사용</string>
     <string name="drivers_bundled">%1$s(내장)</string>
     <string name="drivers_manual">수동</string>
 

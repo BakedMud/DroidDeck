@@ -389,10 +389,10 @@
     <string name="common_size_mb">%1$.1f MB</string>
     <string name="comp_runtime_driver">Controlador de runtime</string>
     <string name="comp_runtime_driver_hint">Lo usan Steam, los juegos y el escritorio. Se aplica en la próxima sesión.</string>
-    <string name="comp_import_turnip">Importar zip de Turnip…</string>
+    <string name="comp_import_turnip">Importar ZIP de controlador del entorno…</string>
     <string name="comp_display_driver">Controlador de pantalla</string>
     <string name="comp_display_driver_hint">Dibuja los fotogramas en pantalla en ambos modos. Reinicia la app para aplicarlo.</string>
-    <string name="comp_import_adrenotools">Importar un zip de AdrenoTools…</string>
+    <string name="comp_import_adrenotools">Importar ZIP de controlador de pantalla…</string>
     <string name="comp_never">nunca</string>
     <string name="comp_nightlies_checked">Última comprobación de Nightlies: %1$s</string>
     <string name="comp_title">Componentes</string>
@@ -1183,8 +1183,8 @@
     <string name="drivers_not_checked">Aún sin comprobar - toca actualizar para buscar controladores nuevos</string>
     <string name="drivers_bundle_sets_display">Android + Linux: define también el controlador de pantalla</string>
     <string name="drivers_bundle_sets_runtime">Android + Linux: define también el controlador de runtime</string>
-    <string name="drivers_runtime_builtin">el Turnip integrado en el runtime</string>
-    <string name="drivers_system_vulkan">Vulkan del sistema: no hay versión incluida para esta GPU</string>
+    <string name="drivers_runtime_builtin">Integrado en el entorno de ejecución</string>
+    <string name="drivers_system_vulkan">Usa el controlador Vulkan del sistema del teléfono</string>
     <string name="drivers_bundled">%1$s (incluido)</string>
     <string name="drivers_manual">Manual</string>
 

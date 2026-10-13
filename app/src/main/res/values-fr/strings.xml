@@ -315,10 +315,10 @@
     <string name="common_size_mb">%1$.1f Mo</string>
     <string name="comp_runtime_driver">Pilote d\'environnement d\'exécution</string>
     <string name="comp_runtime_driver_hint">Utilisé par Steam, les jeux et le bureau. Prendra effet à la prochaine session.</string>
-    <string name="comp_import_turnip">Importer Turnip zip…</string>
+    <string name="comp_import_turnip">Importer un ZIP de pilote du runtime…</string>
     <string name="comp_display_driver">Pilote d\'affichage</string>
     <string name="comp_display_driver_hint">Responsable de la sortie vidéo vers l\'écran dans les deux modes. Prendra effet après le redémarrage de l\'application.</string>
-    <string name="comp_import_adrenotools">Importer AdrenoTools zip…</string>
+    <string name="comp_import_adrenotools">Importer un ZIP de pilote d’affichage…</string>
     <string name="comp_never">Jamais</string>
     <string name="comp_nightlies_checked">Nightlies vérifié le %1$s</string>
     <string name="comp_title">Composants</string>

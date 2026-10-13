@@ -80,6 +80,7 @@ fun DriverPage(
     onImport: () -> Unit,
     onRestore: () -> Unit,
     onBack: () -> Unit,
+    canImport: Boolean = true,
 ) {
     val host = rememberMenuHost()
     val colors = MaterialTheme.colorScheme
@@ -146,7 +147,7 @@ fun DriverPage(
             }
         }
         Row(horizontalArrangement = Arrangement.spacedBy(12.dp), verticalAlignment = Alignment.CenterVertically, modifier = Modifier.padding(top = 14.dp)) {
-            SecondaryButton(importLabel, onClick = onImport)
+            if (canImport) SecondaryButton(importLabel, onClick = onImport)
             if (canRestore) FocusText(stringResource(R.string.driver_restore_builtin), pal.signal, onClick = onRestore)
         }
     }

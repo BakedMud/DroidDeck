@@ -401,10 +401,10 @@
     <string name="common_size_mb">%1$.1f MB</string>
     <string name="comp_runtime_driver">Runtime driver</string>
     <string name="comp_runtime_driver_hint">Used by Steam, games and the desktop. Applies next session.</string>
-    <string name="comp_import_turnip">Import Turnip zip…</string>
+    <string name="comp_import_turnip">Import runtime driver zip…</string>
     <string name="comp_display_driver">Display driver</string>
     <string name="comp_display_driver_hint">Draws frames to the screen in both modes. Restart the app to apply.</string>
-    <string name="comp_import_adrenotools">Import an AdrenoTools zip…</string>
+    <string name="comp_import_adrenotools">Import display driver zip…</string>
     <string name="comp_never">never</string>
     <string name="comp_nightlies_checked">Nightlies checked %1$s</string>
     <string name="comp_title">Components</string>
@@ -1252,8 +1252,8 @@
     <string name="drivers_not_checked">Not checked yet - tap refresh to look for new drivers</string>
     <string name="drivers_bundle_sets_display">Android + Linux: sets the display driver with it</string>
     <string name="drivers_bundle_sets_runtime">Android + Linux: sets the runtime driver with it</string>
-    <string name="drivers_runtime_builtin">the Turnip built into the runtime</string>
-    <string name="drivers_system_vulkan">system Vulkan: no bundled build for this GPU</string>
+    <string name="drivers_runtime_builtin">Built into the runtime</string>
+    <string name="drivers_system_vulkan">Uses the phone\'s system Vulkan driver</string>
     <string name="drivers_bundled">%1$s (bundled)</string>
     <string name="drivers_manual">Manual</string>
     <!-- Driver mode, then the driver pair in use -->

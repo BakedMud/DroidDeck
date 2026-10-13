@@ -687,7 +687,7 @@ fun ComponentsPage(
         Row(horizontalArrangement = Arrangement.spacedBy(14.dp), verticalAlignment = Alignment.CenterVertically) {
             when (l) {
                 GPU_TAB -> {
-                    SmallButton(stringResource(R.string.comp_import_zip), onClick = gpuActions.onImportZip)
+                    if (gpu.canImportDrivers) SmallButton(stringResource(R.string.comp_import_zip), onClick = gpuActions.onImportZip)
                     var at by remember { mutableStateOf<Rect?>(null) }
                     Box(Modifier.onGloballyPositioned { at = it.boundsInRoot() }) {
                         FocusText(stringResource(R.string.gpu_separately) + " ›", pal.signal) {
@@ -961,7 +961,7 @@ fun ComponentsPage(
                     if (d == "rt") DriverPage(
                         title = stringResource(R.string.comp_runtime_driver), hint = stringResource(R.string.comp_runtime_driver_hint),
                         rows = gpu.linuxRows, selected = gpu.linuxSelected, downloads = gpu.linuxDownloads,
-                        status = gpu.releaseStatus, checking = gpu.checking, importLabel = stringResource(R.string.comp_import_turnip), canRestore = false,
+                        status = gpu.releaseStatus, checking = gpu.checking, importLabel = stringResource(R.string.comp_import_turnip), canRestore = false, canImport = gpu.canImportDrivers,
                         onSelect = gpuActions.onSelectLinux, onDelete = gpuActions.onRemoveLinux, onRefresh = gpuActions.onRefresh,
                         onDownload = gpuActions.onDownloadDriver, onImport = gpuActions.onImportLinux, onRestore = {}, onBack = { driverPage = null },
                     )
@@ -969,7 +969,7 @@ fun ComponentsPage(
                         title = stringResource(R.string.comp_display_driver), hint = stringResource(R.string.comp_display_driver_hint),
                         rows = gpu.androidRows, selected = gpu.androidSelected, downloads = gpu.androidDownloads,
                         status = gpu.releaseStatus, checking = gpu.checking, importLabel = stringResource(R.string.comp_import_adrenotools),
-                        canRestore = gpu.canRestoreBundled,
+                        canRestore = gpu.canRestoreBundled, canImport = gpu.canImportDrivers,
                         onSelect = gpuActions.onSelectAndroid, onDelete = gpuActions.onRemoveAndroid, onRefresh = gpuActions.onRefresh,
                         onDownload = gpuActions.onDownloadDriver, onImport = gpuActions.onImportAndroid, onRestore = gpuActions.onRestoreBundled,
                         onBack = { driverPage = null },

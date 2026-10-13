@@ -102,6 +102,8 @@ class GpuDriversState(
     val linuxDownloads: List<DownloadRow> = emptyList(),
     val androidDownloads: List<DownloadRow> = emptyList(),
     val canRestoreBundled: Boolean = false,
+    /** Current imported driver formats target Adreno; system-driver GPUs need no import. */
+    val canImportDrivers: Boolean = true,
     /** The Android + Linux bundle both drivers are set to ("DD-Turnip 0.1.0"), or null. */
     val activeBundle: String? = null,
 ) {
