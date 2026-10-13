@@ -18,9 +18,9 @@ on:
   workflow_dispatch:
     inputs:
       component:
-        description: 'Build an APK, libhybris component, or experimental Mali DXVK component for review'
+        description: 'Build an APK, libhybris component, or GPU-specific DXVK component for review'
         type: choice
-        options: [apk, hybris, dxvk-mali]
+        options: [apk, hybris, dxvk-mali, dxvk-xclipse]
         default: apk
 
 permissions:
@@ -38,8 +38,8 @@ env:
 
 jobs:
   hybris:
-    name: ${{ inputs.component == 'dxvk-mali' && 'Build experimental Mali DXVK component' || 'Build libhybris component' }}
-    if: github.event_name == 'workflow_dispatch' && (inputs.component == 'hybris' || inputs.component == 'dxvk-mali')
+    name: ${{ inputs.component == 'dxvk-mali' && 'Build experimental Mali DXVK component' || inputs.component == 'dxvk-xclipse' && 'Build Xclipse DXVK component' || 'Build libhybris component' }}
+    if: github.event_name == 'workflow_dispatch' && (inputs.component == 'hybris' || inputs.component == 'dxvk-mali' || inputs.component == 'dxvk-xclipse')
     runs-on: ubuntu-24.04
     timeout-minutes: 90
     permissions:
@@ -60,6 +60,11 @@ jobs:
           if [ "${{ inputs.component }}" = dxvk-mali ]; then
             python3 -m unittest tools.tests.test_game_environment
           fi
+          if [ "${{ inputs.component }}" = dxvk-xclipse ]; then
+            python3 -m unittest \
+              tools.tests.test_dxvk_xclipse_bc_formats \
+              tools.tests.test_dxvk_xclipse_component
+          fi
       - name: Build the patched runtime
         if: inputs.component == 'hybris'
         run: bash tools/hybris/build_runtime.sh out/hybris
@@ -71,6 +76,14 @@ jobs:
       - name: Build baseline and experimental Mali DXVK payloads
         if: inputs.component == 'dxvk-mali'
         run: bash tools/dxvk/build_mali.sh out/dxvk-mali
+      - name: Build Xclipse DXVK payload from pinned source
+        if: inputs.component == 'dxvk-xclipse'
+        run: bash tools/dxvk/build_xclipse.sh out/dxvk-xclipse
+      - name: Record Xclipse DXVK provenance and candidate release pin
+        if: inputs.component == 'dxvk-xclipse'
+        env:
+          COMPONENT_URL: https://github.com/${{ github.repository }}/releases/download/dxvk-xclipse-${{ github.sha }}/dxvk-2.6.2.tar.gz
+        run: python3 tools/dxvk/xclipse_component_record.py out/dxvk-xclipse/dxvk-2.6.2.tar.gz --url "$COMPONENT_URL"
       - uses: actions/upload-artifact@v4
         if: inputs.component == 'hybris'
         with:
@@ -84,6 +97,12 @@ jobs:
           path: |
             out/dxvk-mali/dxvk-mali-payloads.tar.zst
             out/dxvk-mali/dxvk-mali-payloads.SHA256SUMS
+          if-no-files-found: error
+      - uses: actions/upload-artifact@v4
+        if: inputs.component == 'dxvk-xclipse'
+        with:
+          name: dxvk-xclipse-${{ github.sha }}
+          path: out/dxvk-xclipse/
           if-no-files-found: error
 
   build:
