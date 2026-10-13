@@ -50,6 +50,41 @@ endian = 'little'
 EOF
 }
 
+check_coff_machine() {
+  local object=$1 expected=$2
+  python3 - "$object" "$expected" <<'PY'
+from pathlib import Path
+import struct
+import sys
+
+path = Path(sys.argv[1])
+expected = int(sys.argv[2], 0)
+data = path.read_bytes()
+if len(data) < 2:
+    raise SystemExit(f'{path}: truncated COFF object')
+machine, = struct.unpack_from('<H', data)
+if machine != expected:
+    raise SystemExit(f'{path}: COFF machine {machine:#06x}, expected {expected:#06x}')
+PY
+}
+
+verify_compiler_targets() {
+  local architecture triplet expected compiler probe
+  : > "$compiler_targets"
+  while IFS=$'\t' read -r architecture triplet expected; do
+    compiler="$toolchain/${triplet}-clang"
+    test -x "$compiler" || die "missing $architecture LLVM-mingw compiler: $compiler"
+    probe="$work/compiler-target-$architecture.obj"
+    printf 'int droiddeck_compiler_target_probe;\n' | "$compiler" -x c -c - -o "$probe"
+    check_coff_machine "$probe" "$expected"
+    printf '%s\t%s\t%s\n' "$architecture" "$triplet" "$expected" >> "$compiler_targets"
+  done <<'EOF'
+i386-windows	i686-w64-mingw32	0x014c
+x86_64-windows	x86_64-w64-mingw32	0x8664
+aarch64-windows	aarch64-w64-mingw32	0xaa64
+EOF
+}
+
 check_payload() {
   local payload=$1
   test -x "$payload/run-proton.py" || die "managed payload wrapper is not executable: $payload/run-proton.py"
@@ -144,9 +179,10 @@ write_payload_metadata() {
     printf 'proton_recipe=%s\n' "$DXVK_MALI_PROTON_RECIPE"
     "$toolchain/i686-w64-mingw32-clang" --version
     "$toolchain/x86_64-w64-mingw32-clang" --version
-    "$toolchain/arm64ec-w64-mingw32-clang" --version
+    "$toolchain/aarch64-w64-mingw32-clang" --version
   } > "$payload/compiler.txt"
   cp "$tool_versions" "$payload/tool-versions.txt"
+  cp "$compiler_targets" "$payload/compiler-targets.txt"
   check_payload "$payload"
   (
     cd "$payload"
@@ -174,7 +210,7 @@ build_payload() {
   done <<'EOF'
 i386-windows	i686-w64-mingw32	x86	x86
 x86_64-windows	x86_64-w64-mingw32	x86_64	x86_64
-aarch64-windows	arm64ec-w64-mingw32	aarch64	aarch64
+aarch64-windows	aarch64-w64-mingw32	aarch64	aarch64
 EOF
 }
 
@@ -215,9 +251,8 @@ inside_container() {
     "$toolchain/llvm-objdump" --version
   } > "$tool_versions"
 
-  test -x "$toolchain/i686-w64-mingw32-clang" || die "missing i686 LLVM-mingw compiler"
-  test -x "$toolchain/x86_64-w64-mingw32-clang" || die "missing x86_64 LLVM-mingw compiler"
-  test -x "$toolchain/arm64ec-w64-mingw32-clang" || die "missing arm64ec LLVM-mingw compiler"
+  compiler_targets="$work/compiler-targets.txt"
+  verify_compiler_targets
 
   mkdir -p "$source" "$crossfiles"
   git -C "$source" init -q
@@ -230,9 +265,9 @@ inside_container() {
 
   write_cross_file i386-windows i686-w64-mingw32 x86 x86 "'-mstackrealign', '-march=nocona', '-mtune=core-avx2', '-mfpmath=sse'"
   write_cross_file x86_64-windows x86_64-w64-mingw32 x86_64 x86_64 "'-mcmodel=small', '-march=nocona', '-mtune=core-avx2', '-mfpmath=sse'"
-  # Valve's pinned Proton recipe builds this ABI with arm64ec-w64-mingw32;
-  # DXVK's PE artifact remains ordinary ARM64 (0xaa64) in aarch64-windows.
-  write_cross_file aarch64-windows arm64ec-w64-mingw32 aarch64 aarch64 "'-march=armv8.2-a', '-mtune=cortex-x3'"
+  # Native Windows ARM64 payloads are aarch64 PE (0xaa64). ARM64EC is a
+  # distinct hybrid ABI and its driver does not produce this payload.
+  write_cross_file aarch64-windows aarch64-w64-mingw32 aarch64 aarch64 "'-march=armv8.2-a', '-mtune=cortex-x3'"
 
   apply_patches "$root/tools/dxvk/patches"
   python3 "$root/tools/dxvk/check_present_sync.py" "$source/src/dxvk/dxvk_presenter.cpp"
