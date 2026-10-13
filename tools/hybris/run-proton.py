@@ -1,8 +1,9 @@
 #!/usr/bin/python3
 """Select a staged DXVK payload for one DroidDeck Proton game launch.
 
-Place this script beside dxvk/x32/ and dxvk/x64/, then select its absolute
-path with DROIDDECK_PROTON_WRAPPER in the game's environment settings.
+Place this script beside a DXVK payload, then select its absolute path with
+DROIDDECK_PROTON_WRAPPER in the game's environment settings. Payloads can use
+x32/x64 or Proton's i386-windows/x86_64-windows/aarch64-windows directories.
 Run `python3 run-proton.py --check /path/to/proton` to check the payload and
 Proton source layout without starting Proton or changing a game prefix.
 
@@ -13,16 +14,38 @@ change synchronization settings, or provide game-specific workarounds.
 import argparse
 import os
 from pathlib import Path
+import struct
 import sys
 
 
 DLL_NAMES = ("d3d8.dll", "d3d9.dll", "d3d10core.dll", "d3d11.dll", "dxgi.dll")
+PE_MACHINES = {"i386-windows": 0x014c, "x86_64-windows": 0x8664, "aarch64-windows": 0xaa64}
 PREFIX_MARKER = "droiddeck-dxvk-profile-v1"
+
+
+def check_machine(dll, expected):
+    """Reject a misplaced architecture before Proton changes the prefix."""
+    with dll.open("rb") as stream:
+        header = stream.read(64)
+        if len(header) != 64 or header[:2] != b"MZ":
+            raise ValueError(f"invalid PE DXVK file: {dll}")
+        offset = struct.unpack_from("<I", header, 60)[0]
+        if offset < 64:
+            raise ValueError(f"invalid PE DXVK file: {dll}")
+        stream.seek(offset)
+        pe = stream.read(6)
+        if len(pe) != 6 or pe[:4] != b"PE\0\0":
+            raise ValueError(f"invalid PE DXVK file: {dll}")
+        machine = struct.unpack_from("<H", pe, 4)[0]
+        if machine != expected:
+            raise ValueError(f"wrong DXVK machine 0x{machine:04x}, expected 0x{expected:04x}: {dll}")
 
 
 def prepare(proton, dxvk):
     """Validate all inputs and compile an in-memory copy of the Proton script."""
-    for architecture in ("x32", "x64"):
+    native_layout = dxvk.name == "dxvk-mali" or any((dxvk / arch).exists() for arch in PE_MACHINES)
+    architectures = PE_MACHINES if native_layout else ("x32", "x64")
+    for architecture in architectures:
         for name in DLL_NAMES:
             dll = dxvk / architecture / name
             if not dll.is_file():
@@ -30,14 +53,23 @@ def prepare(proton, dxvk):
             with dll.open("rb") as stream:
                 if not stream.read(1):
                     raise ValueError(f"empty DXVK file: {dll}")
+            if native_layout:
+                check_machine(dll, PE_MACHINES[architecture])
 
     source = proton.read_text(encoding="utf-8")
     for is32, architecture in (("False", "x64"), ("True", "x32")):
         needle = f'g_proton.arch_pe_dir("wine/dxvk", {is32}) + f + ".dll"'
         if source.count(needle) != 1:
             raise ValueError(f"unsupported Proton layout: expected one {architecture} DXVK copy expression")
-        directory = str(dxvk / architecture) + "/"
-        source = source.replace(needle, repr(directory) + ' + f + ".dll"', 1)
+        if native_layout:
+            # Let the selected Proton choose its architecture. A 64-bit game
+            # can use native ARM64 or x86-64 depending on its runtime settings.
+            directories = {arch: str(dxvk / arch) + "/" for arch in PE_MACHINES}
+            selected = f'g_proton.arch_pe_dir("wine/dxvk", {is32}).rstrip("/").rsplit("/", 1)[-1]'
+            replacement = repr(directories) + "[" + selected + '] + f + ".dll"'
+        else:
+            replacement = repr(str(dxvk / architecture) + "/") + ' + f + ".dll"'
+        source = source.replace(needle, replacement, 1)
 
     needle = "            # check whether any prefix config has changed"
     if source.count(needle) != 1:
