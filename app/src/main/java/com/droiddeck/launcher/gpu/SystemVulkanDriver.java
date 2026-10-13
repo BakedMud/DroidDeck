@@ -248,7 +248,9 @@ public final class SystemVulkanDriver {
         environment.add("BL_POWERVR_RENDER_NODE=" + node);
         // Inner Gamescope/Xwayland lacks the bridge's Android-buffer WSI protocols.
         environment.add("BL_STEAM_GL_PRESENT=1");
-        // Only actual Proton game launches use the bundled DXVK and X11 WSI layer.
+        environment.add("BL_STEAM_WSI_LAYER_PATH=" + new File(directory, "wsi").getPath());
+        // Only actual Proton game launches use the bundled DXVK; Steam gets the WSI subdirectory
+        // separately above without opting other session processes into the game wrapper.
         environment.add("DROIDDECK_POWERVR_RUNTIME=" + directory.getPath());
     }
 }

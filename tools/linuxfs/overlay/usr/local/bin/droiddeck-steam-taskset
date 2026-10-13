@@ -11,6 +11,11 @@ if [ "$#" -ge 2 ] && [[ "$1" =~ ^(0[xX])?[0-9a-fA-F]+$ ]] &&
   if ! /usr/bin/taskset -p "$mask" "$$" >/dev/null 2>&1; then
     echo "droiddeck: Steam helper CPU pinning unavailable; using the allowed CPUs" >&2
   fi
+  # Valve's helper script disables Kopper, but the PowerVR Steam path needs Kopper so Zink presents
+  # through the explicit WSI layer instead of the scrambled DRI3 path.
+  if [ "${BL_STEAM_GL_WSI_ACTIVE:-}" = 1 ]; then
+    unset LIBGL_KOPPER_DISABLE
+  fi
   exec -- "$@"
 fi
 # Queries, existing-process changes, and other programs retain taskset's behavior.

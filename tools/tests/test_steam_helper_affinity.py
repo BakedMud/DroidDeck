@@ -11,13 +11,14 @@ WRAPPER = Path(__file__).resolve().parents[1] / "linuxfs/overlay/usr/local/bin/d
 
 
 class SteamHelperAffinityTest(unittest.TestCase):
-    def launch(self, status, form="helper", configured=True):
+    def launch(self, status, form="helper", configured=True, wsi=False):
         with tempfile.TemporaryDirectory(prefix="droiddeck-helper-") as temporary:
             root = Path(temporary)
             helper = root / "steamwebhelper"
             helper.write_text(f"#!{sys.executable}\n" +
                               'import json, os, sys\n'
                               'with open(os.environ["STARTS"],"a") as f: f.write(json.dumps(sys.argv[1:])+"\\n")\n'
+                              'with open(os.environ["KOPPER"],"a") as f: f.write(str(os.getenv("LIBGL_KOPPER_DISABLE"))+"\\n")\n'
                               'sys.exit(23)\n')
             helper.chmod(0o755)
             real = root / "real-taskset"
@@ -44,19 +45,24 @@ class SteamHelperAffinityTest(unittest.TestCase):
                 args[0] = "not-a-mask"
             elif form == "empty":
                 args = []
-            env = dict(os.environ, TRACE=str(root / "trace"), STARTS=str(root / "starts"))
+            env = dict(os.environ, TRACE=str(root / "trace"), STARTS=str(root / "starts"),
+                       KOPPER=str(root / "kopper"))
             env.pop("BL_STEAM_WEBHELPER", None)
+            env.pop("BL_STEAM_GL_WSI_ACTIVE", None)
             if configured:
                 env["BL_STEAM_WEBHELPER"] = str(helper)
+            if wsi:
+                env.update(BL_STEAM_GL_WSI_ACTIVE="1", LIBGL_KOPPER_DISABLE="true")
             result = subprocess.run(["bash", str(wrapper), *args], env=env,
                                     capture_output=True, text=True, timeout=5)
             trace = [json.loads(x) for x in (root / "trace").read_text().splitlines()]
             starts = ([json.loads(x) for x in (root / "starts").read_text().splitlines()]
                       if (root / "starts").exists() else [])
-            return result, trace, starts, args
+            kopper = ((root / "kopper").read_text().splitlines() if (root / "kopper").exists() else [])
+            return result, trace, starts, kopper, args
 
     def test_denied_pinning_still_executes_helper_once(self):
-        result, trace, starts, args = self.launch(1)
+        result, trace, starts, _, args = self.launch(1)
         self.assertEqual(result.returncode, 23)
         self.assertEqual(starts, [args[2:]])
         self.assertEqual(len(trace), 1)
@@ -65,22 +71,28 @@ class SteamHelperAffinityTest(unittest.TestCase):
         self.assertIn("using the allowed CPUs", result.stderr)
 
     def test_successful_pinning_preserves_helper_exit_status(self):
-        result, trace, starts, args = self.launch(0)
+        result, trace, starts, _, args = self.launch(0)
         self.assertEqual(result.returncode, 23)
         self.assertEqual(starts, [args[2:]])
         self.assertEqual(trace[0][:2], ["-p", "0x7c"])
         self.assertNotIn("pinning unavailable", result.stderr)
 
     def test_symlink_to_actual_helper_is_recognized(self):
-        result, _, starts, args = self.launch(1, "alias")
+        result, _, starts, _, args = self.launch(1, "alias")
         self.assertEqual(result.returncode, 23)
         self.assertEqual(starts, [args[2:]])
+
+    def test_wsi_path_overrides_valves_kopper_disable(self):
+        result, _, starts, kopper, args = self.launch(0, wsi=True)
+        self.assertEqual(result.returncode, 23)
+        self.assertEqual(starts, [args[2:]])
+        self.assertEqual(kopper, ["None"])
 
     def test_other_taskset_forms_and_targets_pass_through(self):
         for form, configured in [("other", True), ("query", True), ("invalid", True),
                                  ("empty", True), ("helper", False)]:
             with self.subTest(form=form, configured=configured):
-                result, trace, starts, args = self.launch(47, form, configured)
+                result, trace, starts, _, args = self.launch(47, form, configured)
                 self.assertEqual(result.returncode, 47)
                 self.assertEqual(trace, [args])
                 self.assertEqual(starts, [])
