@@ -139,6 +139,16 @@ archive before replacing its entry in `release.json`; retain the other DXVK
 payload pins. A layer change that removes a previously advertised emulated feature
 must ship together with any consumer change needed to use its actual capabilities.
 
+The companion [Gamescope component](https://github.com/wallentx/DroidDeck/releases/tag/gamescope-architecture-20261013-a7d9ee27)
+passed [CI](https://github.com/wallentx/DroidDeck/actions/runs/38483100815) with the
+downstream GPU presentation patches and upstream's per-window limiter fix through
+`4163b31b`. Its public archive hash, AArch64 executable, declared dependencies and
+symbol requirements were checked before updating `tools/gamescope/release.env`.
+That older component path validates the archive hash, but does not enforce a
+recipe-input gate. Rebuild and verify its archive whenever its patch set changes;
+the attached source-input record documents this build without claiming a hermetic
+Arch compiler environment.
+
 ## Comparing native, bare, and compatibility capabilities
 
 `tools/vulkan/capability_report.py` compares saved captures without accessing a
