@@ -4,8 +4,11 @@ import android.content.Context
 import android.content.pm.ActivityInfo
 import androidx.annotation.StringRes
 import com.droiddeck.launcher.R
+import com.droiddeck.launcher.core.CpuAllocationDefaults
 import com.droiddeck.launcher.core.GameEnvironment
 import com.droiddeck.launcher.core.TextureFiltering
+import com.droiddeck.launcher.core.ZramSupport
+import com.droiddeck.launcher.gpu.Cardboard
 import com.droiddeck.launcher.gpu.ScreenEffects
 import com.droiddeck.launcher.gpu.SystemVulkanDriver
 import com.droiddeck.launcher.gpu.TurnipDriver
@@ -282,26 +285,34 @@ object SessionPrefs {
         prefs(context).edit().putBoolean("wifiDiscoveryAsked", true).apply()
     }
 
-    /**
-     * Whether the client's own core pick is overridden. When on, BL_CLIENT_CPUS is sent even when
-     * it names every core - unlike a game mask, the point here is to undo a pin Steam applies to
-     * itself, and the scheduler's default is exactly what Steam's choice takes away.
-     */
-    fun clientCpusOverride(context: Context): Boolean = prefs(context).getBoolean("clientCpusOverride", false)
+    internal data class CoreAllocation(val clientOverride: Boolean, val clientCpus: String, val gameCpus: String)
+
+    /** Defaults are read only for absent keys; even a saved empty/all-core choice wins. */
+    internal fun coreAllocation(context: Context, defaults: CpuAllocationDefaults.Allocation? = CpuAllocationDefaults.device): CoreAllocation {
+        val saved = prefs(context)
+        return CoreAllocation(
+            saved.getBoolean("clientCpusOverride", defaults != null && !saved.contains("clientCpus")),
+            saved.getString("clientCpus", defaults?.client.orEmpty()).orEmpty(),
+            saved.getString("gameCpus", defaults?.game.orEmpty()).orEmpty(),
+        )
+    }
+
+    /** Use the device default until the user saves an override or a client mask. */
+    fun clientCpusOverride(context: Context): Boolean = coreAllocation(context).clientOverride
 
     fun setClientCpusOverride(context: Context, on: Boolean) {
         prefs(context).edit().putBoolean("clientCpusOverride", on).apply()
     }
 
     /** Comma-separated core list for the client (taskset -c syntax); "" = every core. */
-    fun clientCpus(context: Context): String = prefs(context).getString("clientCpus", "") ?: ""
+    fun clientCpus(context: Context): String = coreAllocation(context).clientCpus
 
     fun setClientCpus(context: Context, list: String) {
         prefs(context).edit().putString("clientCpus", list).apply()
     }
 
-    /** Comma-separated core list for games (taskset -c syntax); "" = every core = nothing sent. */
-    fun gameCpus(context: Context): String = prefs(context).getString("gameCpus", "") ?: ""
+    /** Comma-separated core list for games (taskset -c syntax); "" = every core (explicitly restored when the client is pinned). */
+    fun gameCpus(context: Context): String = coreAllocation(context).gameCpus
 
     fun setGameCpus(context: Context, list: String) {
         prefs(context).edit().putString("gameCpus", list).apply()
@@ -847,6 +858,31 @@ object SessionPrefs {
         prefs(context).edit().putString("screenEffects", effects.encode().toString()).apply()
     }
 
+    /** The key [cardboard] lives under; SessionActivity watches it so a change applies live. */
+    const val CARDBOARD_KEY = "cardboard"
+
+    /** Cardboard mode (gpu/Cardboard) as last set; off by default. */
+    fun cardboard(context: Context): Cardboard {
+        val text = prefs(context).getString(CARDBOARD_KEY, null) ?: return Cardboard.OFF
+        return runCatching { Cardboard.decode(JSONObject(text)) }.getOrDefault(Cardboard.OFF)
+    }
+
+    fun setCardboard(context: Context, cardboard: Cardboard) {
+        prefs(context).edit().putString(CARDBOARD_KEY, cardboard.encode().toString()).apply()
+    }
+
+    /** The Cardboard picture (Cardboard.SOURCE_*) to go back to once SteamVR stops; -1 = none (it was
+     *  not switched for SteamVR). Kept across activity restarts, so a SteamVR session that outlives the
+     *  activity still hands the picture back. */
+    fun cardboardSourceBeforeSteamVr(context: Context): Int = prefs(context).getInt("cardboardSourceBeforeSteamVr", -1)
+
+    fun setCardboardSourceBeforeSteamVr(context: Context, source: Int) {
+        prefs(context).edit().putInt("cardboardSourceBeforeSteamVr", source).apply()
+    }
+
+    /** The prefs file [cardboard] lives in, for a change listener. */
+    fun sessionPrefs(context: Context): android.content.SharedPreferences = prefs(context)
+
     val textureAnisotropyChoices = TextureFiltering.ANISOTROPY.map { it to if (it == 0) "Off" else "${it}x" }
 
     /** [textureAnisotropyChoices] labelled in the app's language. */
@@ -1031,6 +1067,16 @@ object SessionPrefs {
                 putString(policyKey, SUSPEND_AUTO)
             }
         }.apply()
+    }
+
+    /** Steam only: the client's memory goes to the device's zram while a game runs (ZramSupport). */
+    fun zramCompression(context: Context): Boolean {
+        val prefs = prefs(context)
+        return if (prefs.contains("zramCompression")) prefs.getBoolean("zramCompression", false) else ZramSupport.recommended(context)
+    }
+
+    fun setZramCompression(context: Context, on: Boolean) {
+        prefs(context).edit().putBoolean("zramCompression", on).apply()
     }
 
     // ── Game storage ────────────────────────────────────────────────────────────────────────

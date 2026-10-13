@@ -6,6 +6,7 @@
 #include "vk_external_image_sync.h"
 #include "sc_layer.h"
 #include "effects_chain.h"
+#include "cardboard.h"
 #include "framegen_bridge.h"
 #include "hdr_compose.h"
 #include "blend_pass.h"
@@ -554,6 +555,7 @@ static int dev_init(void) {
     g_vk.CreateFence(g_dev, &fci, NULL, &g_fence);
 
     vkp_effects_bind_device(g_dev, g_pd, &g_memprops);
+    vkp_cardboard_bind_device(g_dev, &g_memprops);
     hdrc_bind_device(g_dev, &g_memprops);
     blendp_bind_device(g_dev);
     g_dev_state = 1;
@@ -1272,6 +1274,7 @@ static void record_draw(VkCommandBuffer cmd, const struct vkp_draw *d, const VkI
 }
 
 static void destroy_scene_image(void) {
+    if (g_scene.img) vkp_effects_forget_image(g_scene.img);
     if (g_scene.img) hdrc_forget_image(g_scene.img); /* the HDR pass may have drawn into it */
     if (g_scene.img) blendp_forget_image(g_scene.img);
     if (g_scene.img) g_vk.DestroyImage(g_dev, g_scene.img, NULL);
@@ -1311,6 +1314,7 @@ static int ensure_scene_image(int w, int h) {
 static int ensure_img(struct vkp_img_slot *s, int w, int h, VkFormat fmt, VkImageUsageFlags usage, const char *what) {
     if (s->img && s->w == w && s->h == h && s->fmt == fmt) return 0;
     if (s->img) hdrc_forget_image(s->img);
+    if (s->img) vkp_effects_forget_image(s->img);
     if (s->img) blendp_forget_image(s->img);
     if (s->img) g_vk.DestroyImage(g_dev, s->img, NULL);
     if (s->mem) g_vk.FreeMemory(g_dev, s->mem, NULL);
@@ -1448,8 +1452,28 @@ static const char *vk_result_name(VkResult r) {
  * standing for the whole scene) through the scene -> output mapping, and leave the image ready
  * to present. */
 static void record_screen_blit(VkCommandBuffer cmd, VkImage src, int src_w, int src_h,
-                               int scene_w, int scene_h, uint32_t img, VkFilter filter) {
+                               int scene_w, int scene_h, uint32_t img, VkFilter filter, int cardboard) {
     VkImageSubresourceRange range = {VK_IMAGE_ASPECT_COLOR_BIT, 0, 1, 0, 1};
+    /* Cardboard mode (cardboard.h): the pass turns src into the two eye views over the whole panel,
+     * and that image is blitted 1:1 instead of src going through the scene mapping. */
+    int direct = 0;
+    if (cardboard) {
+        VkImageMemoryBarrier rd = {
+            .sType = VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER, .oldLayout = VK_IMAGE_LAYOUT_GENERAL,
+            .newLayout = VK_IMAGE_LAYOUT_GENERAL,
+            .srcQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED, .dstQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED,
+            .image = src, .subresourceRange = range,
+            .srcAccessMask = VK_ACCESS_MEMORY_WRITE_BIT, .dstAccessMask = VK_ACCESS_SHADER_READ_BIT};
+        g_vk.CmdPipelineBarrier(cmd, VK_PIPELINE_STAGE_ALL_COMMANDS_BIT, VK_PIPELINE_STAGE_FRAGMENT_SHADER_BIT,
+                                0, 0, NULL, 0, NULL, 1, &rd);
+        VkImage eyes = vkp_cardboard_run(cmd, src, src_w, src_h, (int)g_extent.width, (int)g_extent.height);
+        if (eyes) {
+            src = eyes;
+            src_w = (int)g_extent.width;
+            src_h = (int)g_extent.height;
+            direct = 1;
+        }
+    }
     VkImageMemoryBarrier pre[2] = {
         {.sType = VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER, .oldLayout = VK_IMAGE_LAYOUT_UNDEFINED,
          .newLayout = VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL,
@@ -1467,7 +1491,12 @@ static void record_screen_blit(VkCommandBuffer cmd, VkImage src, int src_w, int 
     struct vkp_image tmp = {.w = src_w, .h = src_h}; /* only its size is looked at */
     struct vkp_draw d = {&tmp, 0, 0, (float)src_w, (float)src_h, 0, 0, scene_w, scene_h};
     VkImageBlit blit;
-    const int have_blit = draw_to_blit(&d, &blit);
+    const int have_blit = direct ? 1 : draw_to_blit(&d, &blit);
+    if (direct)
+        blit = (VkImageBlit){.srcSubresource = {VK_IMAGE_ASPECT_COLOR_BIT, 0, 0, 1},
+                             .srcOffsets = {{0, 0, 0}, {src_w, src_h, 1}},
+                             .dstSubresource = {VK_IMAGE_ASPECT_COLOR_BIT, 0, 0, 1},
+                             .dstOffsets = {{0, 0, 0}, {src_w, src_h, 1}}};
     /* The result fills its whole mapped rectangle, so only the letterbox bars around it need black. */
     if (!have_blit || !record_bars_clear(cmd, g_images[img], &blit)) {
         VkClearColorValue black = {.float32 = {0.0f, 0.0f, 0.0f, 1.0f}};
@@ -1677,6 +1706,15 @@ static int render_impl(int scene_w, int scene_h, const struct vkp_draw *draws, i
      * blit filter follows the scaling mode. */
     const int fx = !g_plain_frame && vkp_effects_active();
     const int fg = !g_plain_frame && vkp_framegen_active();
+    /* Cardboard mode needs the whole frame too; it works on the 8-bit picture only (an HDR frame
+     * is shown flat, said once). */
+    int cb = !g_plain_frame && vkp_cardboard_active();
+    if (cb && hf) {
+        static int said;
+        if (!said) { said = 1; droiddeck_log("cardboard", "HDR frames are shown flat: the cardboard pass is 8-bit only"); }
+        cb = 0;
+    }
+    vkp_cardboard_begin_frame();
     /* HDR frames with frame generation through an HDR10 swapchain: the scene, the effects and the
      * engine's frames in FP16 (FG_HDR_FMT) where the engine can take that format - more than 8 bits of
      * PQ through interpolation - else the 8-bit scene, as before. */
@@ -1700,7 +1738,7 @@ static int render_impl(int scene_w, int scene_h, const struct vkp_draw *draws, i
         }
     }
     /* An HDR scene always takes the pass: its draws are composed into one encoding first. */
-    const int pass = deep || ((fx || fg || (hf && n > 0)) && ensure_scene_image(scene_w, scene_h) == 0);
+    const int pass = deep || ((fx || fg || cb || (hf && n > 0)) && ensure_scene_image(scene_w, scene_h) == 0);
     VkImage scene_img = deep ? g_fgscene.img : g_scene.img;
     const VkFormat scene_fmt = deep ? FG_HDR_FMT : SCENE_FMT;
     const VkFilter blit_filter = vkp_effects_blit_filter();
@@ -1851,7 +1889,7 @@ static int render_impl(int scene_w, int scene_h, const struct vkp_draw *draws, i
         }
 
         /* 4. Mapping/blit: the first present carries generated frame 0, or the result itself. */
-        record_screen_blit(cmd, ngen ? gens[0] : result, rw, rh, scene_w, scene_h, img, blit_filter);
+        record_screen_blit(cmd, ngen ? gens[0] : result, rw, rh, scene_w, scene_h, img, blit_filter, cb);
     }
     g_vk.EndCommandBuffer(cmd);
 
@@ -1875,7 +1913,7 @@ static int render_impl(int scene_w, int scene_h, const struct vkp_draw *draws, i
             VkCommandBuffer ck = g_cmds[k];
             g_vk.ResetCommandBuffer(ck, 0);
             g_vk.BeginCommandBuffer(ck, &bi);
-            record_screen_blit(ck, k < ngen ? gens[k] : result, rw, rh, scene_w, scene_h, img, blit_filter);
+            record_screen_blit(ck, k < ngen ? gens[k] : result, rw, rh, scene_w, scene_h, img, blit_filter, cb);
             g_vk.EndCommandBuffer(ck);
         }
         const int last = (k + 1 == presents);

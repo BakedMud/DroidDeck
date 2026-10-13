@@ -66,6 +66,11 @@ public class LinuxVulkanDriverManager {
         return new File(rootDir, id);
     }
 
+    /** Vendor-neutral ICD filename; the loader itself is not a driver payload. */
+    public static boolean isDriverLibraryName(String name) {
+        return name.startsWith("libvulkan_") && name.endsWith(".so") && name.indexOf('/') < 0 && name.indexOf('\\') < 0;
+    }
+
     /** Installed = has the .so AND the generated manifest (a half-extracted dir is never offered). */
     public boolean isInstalled(String id) {
         if (id == null || id.isEmpty() || id.contains("/") || id.contains("..")) return false;
@@ -141,8 +146,8 @@ public class LinuxVulkanDriverManager {
                     // Flatten: only the base name matters, and it also defeats zip-slip paths.
                     String base = new File(entry.getName()).getName();
                     if (base.isEmpty()) continue;
-                    if (base.startsWith("libvulkan_freedreno") && base.endsWith(".so")) {
-                        if (soName != null) Log.w(TAG, "zip has several libvulkan_freedreno*.so; using the first (" + soName + ")");
+                    if (isDriverLibraryName(base)) {
+                        if (soName != null) Log.w(TAG, "zip has several Vulkan ICD libraries; using the first (" + soName + ")");
                         else {
                             Files.copy(zis, new File(tmpDir, LIB_NAME).toPath(), StandardCopyOption.REPLACE_EXISTING);
                             soName = base;

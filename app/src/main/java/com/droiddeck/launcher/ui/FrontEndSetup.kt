@@ -159,9 +159,10 @@ internal fun SetupPanel(
     }
     val colors = MaterialTheme.colorScheme
     val pal = LocalPalette.current
-    // Tested hardware passes; an Adreno below it (a 610, say) warns rather than claiming support.
+    // An available backend passes readiness; untested hardware keeps its warning icon.
     val gpu = remember { com.droiddeck.launcher.gpu.GpuInfo.detect() }
-    val gpuOk = gpu.support == com.droiddeck.launcher.gpu.GpuInfo.Support.TESTED
+    val gpuOk = remember { DeviceSupport.graphicsAvailable() }
+    val gpuTested = gpu.support == com.droiddeck.launcher.gpu.GpuInfo.Support.TESTED
     val gpuName = remember { DeviceSupport.gpuName(ctx) }
     val limitBlocks = PhantomProcessLimit.blocksSteam(s.phantomProcessStatus)
     val signedIn = s.offlineAccount != null
@@ -203,7 +204,7 @@ internal fun SetupPanel(
                     0 -> {
                         val gpuCheck: @Composable (Boolean) -> Unit = { divider ->
                             CheckRow(
-                                if (gpuOk) CheckState.OK else CheckState.WARN,
+                                if (gpuOk && gpuTested) CheckState.OK else CheckState.WARN,
                                 when (gpu.support) {
                                     com.droiddeck.launcher.gpu.GpuInfo.Support.TESTED -> stringResource(R.string.setup_gpu_supported)
                                     com.droiddeck.launcher.gpu.GpuInfo.Support.UNTESTED -> stringResource(R.string.setup_gpu_untested)
@@ -308,6 +309,7 @@ internal fun SetupPanel(
                                 s.offlineAccount?.takeIf { it.isNotEmpty() }?.let { stringResource(R.string.setup_ready_signed_in, it) },
                             ).joinToString(" · "),
                             open = showChecks, onDetails = { showChecks = !showChecks },
+                            warning = gpuOk && !gpuTested,
                         ) {
                             val shownChecks = all.filterIndexed { i, _ -> checks[i] }
                             shownChecks.forEachIndexed { i, check -> check(i < shownChecks.lastIndex) }
@@ -321,15 +323,7 @@ internal fun SetupPanel(
                                 }
                             }
                         }
-                        SettingsGroup(stringResource(R.string.setup_account)) {
-                            accountCheck(true)
-                            ToggleRow(
-                                host, "offline", stringResource(R.string.setup_offline),
-                                s.offlineAccount?.let { if (it.isEmpty()) stringResource(R.string.setup_signed_in_unnamed) else stringResource(R.string.setup_signed_in, it) } ?: stringResource(R.string.setup_sign_in_first),
-                                s.offline, enabled = s.offlineAccount != null,
-                            ) { a.onOffline() }
-                        }
-                        SettingsGroup(stringResource(R.string.setup_runtime)) { runtimeCheck(false) }
+                        if (runtimeOk && !showChecks) SettingsGroup(stringResource(R.string.setup_runtime)) { runtimeCheck(false) }
                     }
                     1 -> {
                         val controller = s.controller
@@ -413,6 +407,8 @@ internal fun SetupPanel(
                             ActionRow(stringResource(R.string.setup_latest_logs), stringResource(R.string.drawer_logs_hint), stringResource(R.string.drawer_share_logs), a.onShareLogs,
                                 progress = com.droiddeck.launcher.session.SessionLogShare.progress)
                             ActionRow(stringResource(R.string.setup_saved_logs), stringResource(R.string.setup_saved_logs_hint, com.droiddeck.launcher.session.SessionPaths.KEEP_SESSIONS), stringResource(R.string.setup_clear_logs), a.onClearLogs)
+                            ActionRow(stringResource(R.string.setup_reset_settings), stringResource(R.string.setup_reset_settings_hint),
+                                stringResource(R.string.setup_reset_settings_button), a.onResetSettings)
                         }
                     }
                 }
@@ -426,7 +422,7 @@ internal fun SetupPanel(
  * line of what that means, and a Details chip that opens the checks themselves in place ([checks]).
  */
 @Composable
-private fun ReadinessCard(passing: Int, total: Int, line: String, open: Boolean, onDetails: () -> Unit, checks: @Composable () -> Unit) {
+private fun ReadinessCard(passing: Int, total: Int, line: String, open: Boolean, onDetails: () -> Unit, warning: Boolean = false, checks: @Composable () -> Unit) {
     val colors = MaterialTheme.colorScheme
     val pal = LocalPalette.current
     val ready = passing == total
@@ -435,7 +431,7 @@ private fun ReadinessCard(passing: Int, total: Int, line: String, open: Boolean,
             verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(14.dp),
             modifier = Modifier.fillMaxWidth().padding(horizontal = 14.dp, vertical = 12.dp),
         ) {
-            val tint = if (ready) pal.good else AttentionAmber
+            val tint = if (ready && !warning) pal.good else AttentionAmber
             Box(contentAlignment = Alignment.Center, modifier = Modifier.size(52.dp)) {
                 androidx.compose.material3.CircularProgressIndicator(
                     progress = { passing / total.toFloat().coerceAtLeast(1f) }, strokeWidth = 4.dp,
@@ -444,10 +440,14 @@ private fun ReadinessCard(passing: Int, total: Int, line: String, open: Boolean,
                 Text("$passing/$total", fontSize = 13.sp, fontWeight = FontWeight.Bold, color = colors.onBackground)
             }
             Column(Modifier.weight(1f)) {
-                Text(
-                    stringResource(if (ready) R.string.setup_ready else R.string.setup_not_ready),
-                    fontSize = 17.sp, fontWeight = FontWeight.Bold, color = colors.onBackground,
-                )
+                Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                    if (warning) Icon(Icons.Filled.PriorityHigh, contentDescription = stringResource(R.string.setup_check_warn),
+                        tint = AttentionAmber, modifier = Modifier.size(20.dp))
+                    Text(
+                        stringResource(if (ready) R.string.setup_ready else R.string.setup_not_ready),
+                        fontSize = 17.sp, fontWeight = FontWeight.Bold, color = colors.onBackground,
+                    )
+                }
                 if (line.isNotEmpty()) Text(line, fontSize = 13.sp, color = colors.onSurfaceVariant, maxLines = 2, overflow = TextOverflow.Ellipsis)
             }
             if (passing > 0) SecondaryButton(stringResource(if (open) R.string.common_hide else R.string.setup_details), compact = true, onClick = onDetails)
@@ -503,8 +503,8 @@ internal fun LaunchSettings(s: FrontEndState, a: FrontEndActions, host: MenuHost
         if (controller != null) add { m -> SettingCard(stringResource(R.string.setup_card_controls), stringResource(R.string.setup_card_controls_hint), "card:controls", m, controller.onMapping) }
         // An Epic game's own launch choices, kept in its sidecar so a launch from the Steam client
         // honours them too (droiddeck-store-launch reads the same file).
-        // Epic's launch choices; cloud saves live in the game's Cloud saves view, so a GOG game has no card.
-        val cardStore = com.droiddeck.launcher.stores.Store.byId(game?.source.orEmpty())?.takeIf { it == com.droiddeck.launcher.stores.Store.EPIC }
+        // Store launch choices; cloud saves have their own view.
+        val cardStore = com.droiddeck.launcher.stores.Store.byId(game?.source.orEmpty())?.takeIf { it == com.droiddeck.launcher.stores.Store.EPIC || it == com.droiddeck.launcher.stores.Store.GOG }
         if (cardStore != null && game?.gameFiles != null) add { m ->
             Box(m) {
                 StoreLaunchCard(host, game.gameFiles!!, cardStore)
@@ -545,7 +545,14 @@ private fun StoreLaunchCard(host: MenuHost, folder: java.io.File, store: com.dro
     val options = sidecar?.epic ?: com.droiddeck.launcher.stores.EpicOptions()
     val epic = store == com.droiddeck.launcher.stores.Store.EPIC
     val key = "store-" + store.id
-    val value = buildList {
+    val value = if (!epic) stringResource(when {
+        !com.droiddeck.launcher.stores.gog.GogComet.enabled(appContext) || sidecar?.achievements == false -> R.string.gog_achievements_off
+        com.droiddeck.launcher.stores.gog.GogComet.status == "sign-in-needed" -> R.string.gog_achievements_signin
+        com.droiddeck.launcher.stores.gog.GogComet.status in listOf("service-unavailable", "credentials-unavailable", "not-installed") -> R.string.gog_achievements_unavailable
+        com.droiddeck.launcher.stores.gog.GogComet.status == "uploaded" -> R.string.gog_achievements_uploaded
+        com.droiddeck.launcher.stores.gog.GogComet.status == "pending-upload" || com.droiddeck.launcher.stores.gog.GogComet.status == "unlocked-locally" -> R.string.gog_achievements_pending
+        else -> R.string.gog_achievements_on
+    }) else buildList {
         if (epic && options.offline) add(stringResource(R.string.epic_card_offline))
         else if (epic && options.eos) add(stringResource(R.string.epic_card_eos))
     }.ifEmpty { listOf(stringResource(R.string.epic_card_none)) }.joinToString(" · ")
@@ -564,6 +571,16 @@ private fun StoreLaunchCard(host: MenuHost, folder: java.io.File, store: com.dro
         host.open = if (host.open == key) null else key
     }
     AnchoredMenu(host.open == key, onDismiss = { if (host.open == key) host.open = null }, title = store.shortLabel) { first ->
+        if (!epic) {
+            MenuItem(stringResource(R.string.gog_achievements), checked = sidecar?.achievements != false, focusRequester = first,
+                detail = if (!com.droiddeck.launcher.stores.gog.GogComet.enabled(appContext)) stringResource(R.string.gog_achievements_enable_store) else null) {
+                val on = sidecar?.achievements == false
+                Thread({
+                    val written = runCatching { com.droiddeck.launcher.stores.StoreGameSidecar.updateAchievements(folder, on) }.getOrNull()
+                    com.droiddeck.launcher.stores.StoresState.post { sidecar = written ?: sidecar }
+                }, "gog-game-achievements").start()
+            }
+        }
         if (epic) {
             MenuItem(stringResource(R.string.epic_eos), checked = options.eos, focusRequester = first) { set { it.copy(eos = !it.eos) } }
             MenuItem(stringResource(R.string.epic_offline), checked = options.offline) { set { it.copy(offline = !it.offline) } }

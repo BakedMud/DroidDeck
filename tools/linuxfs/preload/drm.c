@@ -108,12 +108,63 @@ static int same_file_description(int a, int b) {
 #endif
 }
 
+/*
+ * Android kernels before 6.10 have no F_DUPFD_QUERY, while the app seccomp policy blocks kcmp.
+ * F_SETOWN_EX updates the open file description, so a duplicate observes a temporary owner marker
+ * and an independent open of the same render node does not. Restore the original owner before
+ * returning; no signal is armed because these DRM descriptors do not have O_ASYNC set.
+ */
+static int same_owner_description(int owned, int fd) {
+  struct f_owner_ex original_owned, original_fd, observed;
+  if (fcntl(owned, F_GETOWN_EX, &original_owned) < 0 ||
+      fcntl(fd, F_GETOWN_EX, &original_fd) < 0) {
+    return -1;
+  }
+  const struct f_owner_ex candidates[] = {
+      {.type = F_OWNER_TID, .pid = getpid()},
+      {.type = F_OWNER_PID, .pid = getpid()},
+      {.type = F_OWNER_PGRP, .pid = getpgrp()},
+  };
+  const struct f_owner_ex *marker = NULL;
+  for (size_t i = 0; i < sizeof(candidates) / sizeof(candidates[0]); i++) {
+    if (candidates[i].type != original_fd.type || candidates[i].pid != original_fd.pid) {
+      marker = &candidates[i];
+      break;
+    }
+  }
+  if (!marker || fcntl(owned, F_SETOWN_EX, marker) < 0) return -1;
+  int observed_result = fcntl(fd, F_GETOWN_EX, &observed);
+  int observed_errno = errno;
+  int restore_result = fcntl(owned, F_SETOWN_EX, &original_owned);
+  int restore_errno = errno;
+  if (restore_result < 0) {
+    errno = restore_errno;
+    return -1;
+  }
+  if (observed_result < 0) {
+    errno = observed_errno;
+    return -1;
+  }
+  return observed.type == marker->type && observed.pid == marker->pid;
+}
+
 static int same_owned_description(int owned, int fd) {
   int saved_errno = errno;
   int result = fcntl(owned, F_DUPFD_QUERY, fd);
+  if (result >= 0) {
+    errno = saved_errno;
+    return result == 1;
+  }
+#ifdef SYS_kcmp
+  long compared = syscall(SYS_kcmp, getpid(), getpid(), 0 /* KCMP_FILE */, owned, fd);
+  if (compared >= 0) {
+    errno = saved_errno;
+    return compared == 0;
+  }
+#endif
+  int owner_match = same_owner_description(owned, fd);
   errno = saved_errno;
-  if (result >= 0) return result == 1;
-  return same_file_description(owned, fd);
+  return owner_match == 1;
 }
 
 static int find_handle_locked(int fd, uint32_t handle) {
@@ -174,7 +225,11 @@ int drmPrimeFDToHandle(int fd, int prime_fd, uint32_t *handle) {
   if (powervr) {
     owner = fcntl(fd, F_DUPFD_CLOEXEC, 0);
     if (owner < 0) return -errno;
-    if (!same_owned_description(owner, fd)) {
+    /* The old-kernel owner probe mutates shared OFD state briefly; serialize it with lookups. */
+    pthread_mutex_lock(&lock);
+    int owner_matches = same_owned_description(owner, fd);
+    pthread_mutex_unlock(&lock);
+    if (!owner_matches) {
       close(owner);
       errno = EOPNOTSUPP;
       return -EOPNOTSUPP;

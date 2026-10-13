@@ -322,10 +322,12 @@ public final class SystemVulkanDriver {
         // The outer compositor always uses Android-buffer Wayland presentation.
         environment.add("BL_GAMESCOPE_BACKEND=sdl");
         if (selected.requiresRenderNode) {
-            // Preserve the existing Android DRM shim and Steam GL presentation for both DRM profiles.
+            // The DRM preload confirms the pvr driver before emulating handles. Both render-node
+            // profiles use the managed WSI layer for Steam instead of the broken plain DRI3 path.
             environment.add("BL_POWERVR_DRM_HANDLES=1");
             environment.add("BL_POWERVR_RENDER_NODE=" + node);
             environment.add("BL_STEAM_GL_PRESENT=1");
+            environment.add("BL_STEAM_WSI_LAYER_PATH=" + new File(directory, "wsi").getPath());
         }
         environment.add("DROIDDECK_SYSTEM_VULKAN_GPU=" + selected.id);
         environment.add("DROIDDECK_SYSTEM_VULKAN_RUNTIME=" + directory.getPath());

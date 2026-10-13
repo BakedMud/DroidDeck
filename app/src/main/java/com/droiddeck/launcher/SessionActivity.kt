@@ -28,10 +28,12 @@ import android.widget.Toast
 import androidx.activity.ComponentActivity
 import androidx.activity.OnBackPressedCallback
 import androidx.activity.result.contract.ActivityResultContracts
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.setValue
+import androidx.compose.runtime.withFrameNanos
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.ComposeView
 import androidx.compose.ui.graphics.toArgb
@@ -41,7 +43,16 @@ import com.droiddeck.launcher.core.TextureFiltering
 import com.droiddeck.launcher.files.InAppFilePicker
 import com.droiddeck.launcher.frontend.Library
 import com.droiddeck.launcher.agent.AgentGuest
+import com.droiddeck.launcher.frontend.LibraryCache
+import com.droiddeck.launcher.stores.Store
+import com.droiddeck.launcher.stores.StoreAchievements
+import com.droiddeck.launcher.stores.StoreGameSidecar
+import com.droiddeck.launcher.stores.StoreLaunchRequests
+import com.droiddeck.launcher.ui.SessionAchievements
+import com.droiddeck.launcher.gpu.Cardboard
 import com.droiddeck.launcher.gpu.FrameGen
+import com.droiddeck.launcher.gpu.HeadTracker
+import com.droiddeck.launcher.gpu.SteamVr
 import com.droiddeck.launcher.gpu.ScreenEffectLooks
 import com.droiddeck.launcher.gpu.ScreenEffects
 import com.droiddeck.launcher.gpu.Lossless
@@ -255,10 +266,12 @@ class SessionActivity : ComponentActivity(), SurfaceHolder.Callback {
     private var closeAtOnce = false
     /** The drawer's Components tab: the Protons as last read (ComponentsManager). */
     private var drawerComponents by mutableStateOf<ComponentsManager.Snapshot?>(null)
+    private val drawerComponentMenu by lazy { ComponentsMenu(this, uiHandler) }
     private var drawerGameProfileId by mutableStateOf<Long?>(null)
     private val drawerGameInventory = GameProfileInventoryCache<Library.SteamGame>()
     private var drawerGameInventoryRevision = 0L
     private var drawerGameFexPresetSaving by mutableStateOf(false)
+    private var drawerGameNoSteamSaving by mutableStateOf(false)
     private val drawerGameProfileFollowState = GameProfileFollowState()
     private data class DrawerGameProfileRefresh(
         val followsSteam: Boolean,
@@ -280,10 +293,32 @@ class SessionActivity : ComponentActivity(), SurfaceHolder.Callback {
     private var padType by mutableStateOf(SessionPrefs.CONTROLLER_DECK)
     /** The on-screen PC keyboard (ui/PcKeyboard): real key presses, Esc and F1 included. */
     private var pcKeyboardOpen by mutableStateOf(false)
+    /** The game in front, when its source has achievements. */
+    private var achievementsInFront by mutableStateOf<AchievementsInFront?>(null)
+    private var achievementsOpen by mutableStateOf(false)
     private var hudOn by mutableStateOf(true)
     private var upscaler by mutableStateOf(0)
     private var upscaleSharpness by mutableStateOf(75)
     private var effects by mutableStateOf(ScreenEffects.OFF)
+    /** Cardboard mode (gpu/Cardboard) and the sensor that turns the virtual screen with the head. */
+    private var cardboard by mutableStateOf(Cardboard.OFF)
+    private var headTracker: HeadTracker? = null
+    private var steamVrStatus by mutableStateOf<SteamVr.Status?>(null)
+    /** The picture was switched to side-by-side for SteamVR and goes back when it stops. */
+    private var steamVrSwitchedPicture by mutableStateOf(false)
+    /** SteamVR has been seen running since the switch: only then does "not running" mean it stopped. */
+    private var steamVrSeenRunning = false
+    private val hasRotationSensor by lazy {
+        (getSystemService(SENSOR_SERVICE) as android.hardware.SensorManager).let {
+            it.getDefaultSensor(android.hardware.Sensor.TYPE_GAME_ROTATION_VECTOR)
+                ?: it.getDefaultSensor(android.hardware.Sensor.TYPE_ROTATION_VECTOR)
+        } != null
+    }
+    // Held in a field: SharedPreferences keeps its listeners weakly. A change from anywhere (the
+    // drawer, tools/droiddeckctl prefs set) applies live.
+    private val cardboardPrefListener = android.content.SharedPreferences.OnSharedPreferenceChangeListener { _, key ->
+        if (key == SessionPrefs.CARDBOARD_KEY) uiHandler.post { applyCardboard(SessionPrefs.cardboard(this)) }
+    }
     private var textureAnisotropy by mutableStateOf(0)
     private var textureLodBias by mutableStateOf(TextureFiltering.LOD_BIAS_OFF)
     private var drawerTextureAnisotropy by mutableStateOf<Int?>(null)
@@ -338,6 +373,7 @@ class SessionActivity : ComponentActivity(), SurfaceHolder.Callback {
     private val deviceListener = object : InputManager.InputDeviceListener {
         override fun onInputDeviceAdded(deviceId: Int) {
             logInputDevice("connected", deviceId)
+            padBridge?.syncConnectedControllers()
             updateOnScreenControls()
             updatePointerCapture()
         }
@@ -354,7 +390,6 @@ class SessionActivity : ComponentActivity(), SurfaceHolder.Callback {
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
-        requestedOrientation = SessionPrefs.orientation(this)
         if (com.droiddeck.launcher.runtime.LinuxRuntimeInstaller.isRemoving() ||
             com.droiddeck.launcher.runtime.LinuxRuntimeInstaller.isMaintaining()) {
             runtimeRemovalBlocked = true
@@ -494,6 +529,7 @@ class SessionActivity : ComponentActivity(), SurfaceHolder.Callback {
                 when {
                     ::loading.isInitialized && loading.ended -> finish()
                     drawerOpen -> drawerOpen = false
+                    achievementsOpen -> closeAchievements()
                     pcKeyboardOpen -> pcKeyboardOpen = false
                     else -> routeBackAction()
                 }
@@ -514,7 +550,7 @@ class SessionActivity : ComponentActivity(), SurfaceHolder.Callback {
         defaultFocusHighlightEnabled = false
         setContent {
             // The drawer, the PC keyboard and picture in picture take the mouse back.
-            androidx.compose.runtime.LaunchedEffect(drawerOpen, pcKeyboardOpen, pipUi) { updatePointerCapture() }
+            androidx.compose.runtime.LaunchedEffect(drawerOpen, pcKeyboardOpen, achievementsOpen, pipUi) { updatePointerCapture() }
             DroidDeckTheme {
             if (pipUi) {
                 if (SessionState.suspended) androidx.compose.foundation.layout.Box(
@@ -557,6 +593,27 @@ class SessionActivity : ComponentActivity(), SurfaceHolder.Callback {
                         releaseDrawerDirection()
                     }
                 }
+                // SteamVR's state for the Cardboard group, refreshed while the drawer shows it.
+                // Watched for as long as Cardboard mode is on (or the picture is switched for it), drawer open or
+                // not: however SteamVR is started or quit, the picture follows it.
+                LaunchedEffect(cardboard.enabled, steamVrSwitchedPicture) {
+                    while (cardboard.enabled || steamVrSwitchedPicture) {
+                        val now = kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) {
+                            SteamVr.status(this@SessionActivity)
+                        }
+                        onSteamVrStatus(now)
+                        kotlinx.coroutines.delay(3000)
+                    }
+                }
+                LaunchedEffect(drawerOpen, achievementsOpen, AgentGuest.focusRevision, StoreAchievements.revision) {
+                    if (!drawerOpen && !achievementsOpen) return@LaunchedEffect
+                    val found = kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) {
+                        runCatching { resolveAchievementsInFront() }
+                            .onFailure { Log.w(TAG, "achievements in front: ${it.javaClass.simpleName}") }.getOrNull()
+                    }
+                    achievementsInFront = found
+                    if (found == null) achievementsOpen = false
+                }
                 // The PC keyboard takes it too, for moving over the keys; the drawer opens over it.
                 androidx.compose.runtime.LaunchedEffect(pcKeyboardOpen) { if (pcKeyboardOpen) padBridge?.releaseAll() }
                 if (pcKeyboardOpen) com.droiddeck.launcher.ui.PcKeyboard(
@@ -576,6 +633,12 @@ class SessionActivity : ComponentActivity(), SurfaceHolder.Callback {
                     hudOn = hudOn,
                     upscaler = upscaler, upscaleSharpness = upscaleSharpness,
                     effects = effects,
+                    cardboard = cardboard,
+                    cardboardSensor = hasRotationSensor,
+                    onCardboard = { c -> SessionPrefs.setCardboard(this@SessionActivity, c); applyCardboard(c) },
+                    onCardboardRecenter = { headTracker?.recenter() },
+                    steamVr = steamVrStatus,
+                    onSteamVr = { action -> steamVrAction(action) },
                     textureAnisotropy = if (drawerGameProfileId == null) textureAnisotropy else drawerTextureAnisotropy,
                     textureLodBias = if (drawerGameProfileId == null) textureLodBias else drawerTextureLodBias,
                     frameGen = frameGen,
@@ -638,6 +701,8 @@ class SessionActivity : ComponentActivity(), SurfaceHolder.Callback {
                     onKeyboardButton = { on -> updateControllerPrefs { ControllerPrefs.setKeyboardButton(this@SessionActivity, on) } },
                     onSteamMenu = if (SessionState.mode == SessionService.MODE_STEAM) ({ sendSteamGuide() }) else null,
                     onQam = if (SessionState.mode == SessionService.MODE_STEAM) ({ triggerSteamQam() }) else null,
+                    onAchievements = achievementsInFront?.let { { drawerOpen = false; achievementsOpen = true } },
+                    achievementsProgress = achievementsInFront?.progress,
                     // Only where the session set the pad up to be switched (SessionService: deckPad).
                     padType = if (SessionState.mode == SessionService.MODE_STEAM && SessionState.deckPad) padType else null,
                     onPadType = { id ->
@@ -714,7 +779,17 @@ class SessionActivity : ComponentActivity(), SurfaceHolder.Callback {
                     },
                     onClose = { drawerOpen = false },
                     components = drawerComponents,
-                    onComponentsRefresh = { refreshDrawerComponents() },
+                    onComponentsRefresh = {
+                        refreshDrawerComponents()
+                        drawerComponentMenu.refreshComponentCatalog(force = false)
+                    },
+                    componentCatalog = drawerComponentMenu.compCatalog,
+                    componentCatalogAt = drawerComponentMenu.compCatalogAt,
+                    componentCatalogChecking = drawerComponentMenu.compChecking,
+                    componentDownloads = drawerComponentMenu.compDownloads,
+                    componentDownloadRevision = drawerComponentMenu.compDownloadRevision,
+                    onComponentCatalogRefresh = { drawerComponentMenu.refreshComponentCatalog() },
+                    onComponentDownload = drawerComponentMenu::downloadComponent,
                     gameProfiles = drawerGameProfileRefresh.data?.profiles.orEmpty(),
                     selectedGameProfileId = drawerGameProfileId,
                     selectedGameProfile = drawerGameProfileRefresh.data
@@ -729,9 +804,23 @@ class SessionActivity : ComponentActivity(), SurfaceHolder.Callback {
                     onSelectedGameProfileRefresh = ::refreshDrawerGameProfile,
                     gameFexPresetSaving = drawerGameFexPresetSaving,
                     onGameFexPreset = ::setDrawerGameFexPreset,
+                    gameNoSteamSaving = drawerGameNoSteamSaving,
+                    onGameNoSteam = ::setDrawerGameNoSteam,
                     onComponentSwap = { pid, comp, value -> swapDrawerComponent(pid, comp, value) },
                     onGameComponent = ::setDrawerGameComponent,
                 ))
+                // The panel takes the pad, as the PC keyboard does.
+                LaunchedEffect(achievementsOpen) {
+                    if (achievementsOpen) {
+                        padBridge?.releaseAll()
+                        withFrameNanos { }
+                        sessionOverlay.requestFocus()
+                    }
+                }
+                achievementsInFront?.takeIf { achievementsOpen }?.let { inFront ->
+                    SessionAchievements(inFront.game, inFront.title, onClose = ::closeAchievements)
+                }
+                com.droiddeck.launcher.ui.AchievementNotificationOverlay()
                 if (SessionState.suspended) SessionPausedOverlay(
                     title = pausedTitle(),
                     onResume = { SessionService.resume(this@SessionActivity) },
@@ -770,6 +859,28 @@ class SessionActivity : ComponentActivity(), SurfaceHolder.Callback {
     private fun triggerSteamQam() {
         drawerOpen = false
         padBridge?.triggerQam()
+    }
+
+    private fun closeAchievements() { achievementsOpen = false }
+
+    /** A live game window only; Steam's overlay may be in front of that window. */
+    private fun resolveAchievementsInFront(): AchievementsInFront? {
+        if (!SessionState.running || SessionState.mode != SessionService.MODE_STEAM) return null
+        val snapshot = AgentGuest.focus(this) ?: return null
+        val games = LibraryCache.load(this)
+        val byKey = games.mapNotNull { g -> g.profileKey.toLongOrNull()?.let { it to g } }.toMap()
+        val windows = snapshot.optJSONArray("focusableApps")?.let { list -> List(list.length()) { list.optLong(it) } }.orEmpty()
+        val focusedId = snapshot.optLong("focusedApp").takeUnless { snapshot.isNull("focusedApp") }
+        val appId = com.droiddeck.launcher.session.SessionAchievementGame.activeAppId(focusedId, windows, byKey.keys) ?: return null
+        val focused = byKey[appId] ?: return null
+        val store = Store.byId(focused.source) ?: return null
+        val id = focused.storeId ?: return null
+        val source = StoreAchievements.forSource(store.id) ?: return null
+        val sidecar = StoreGameSidecar.find(this, store, id) ?: return null
+        val game = StoreAchievements.Game.of(sidecar)
+        val list = source.cached(this, game) ?: (source.fetch(this, game) as? StoreAchievements.Result.Found)?.list ?: return null
+        if (list.isEmpty()) return null
+        return AchievementsInFront(game, sidecar.title, list.count { it.unlocked } to list.size)
     }
 
     private fun togglePcKeyboard() {
@@ -986,6 +1097,26 @@ class SessionActivity : ComponentActivity(), SurfaceHolder.Callback {
         }, "drawer-game-fex-preset").start()
     }
 
+    private fun setDrawerGameNoSteam(appId: Long, on: Boolean) {
+        if (drawerGameNoSteamSaving) return
+        drawerGameNoSteamSaving = true
+        val name = drawerGameProfileRefresh.data?.profiles?.firstOrNull { it.first == appId }?.second ?: appId.toString()
+        Thread({
+            val message = try {
+                GameEnvironmentStore.setGameNoSteam(this, appId.toString(), on)
+                getString(R.string.comp_game_saved_next, name)
+            } catch (error: Exception) {
+                Log.w(TAG, "Could not save Start without Steam for $appId", error)
+                getString(R.string.session_profile_save_failed, error.message ?: error.javaClass.simpleName)
+            }
+            uiHandler.post {
+                drawerGameNoSteamSaving = false
+                Toast.makeText(this, message, Toast.LENGTH_LONG).show()
+                refreshDrawerGameProfile()
+            }
+        }, "drawer-game-no-steam").start()
+    }
+
     /** The session this screen is bringing up: the live one when re-attached, else the intent's. */
     private fun loadingMode(): String =
         if (SessionState.running) SessionState.mode
@@ -1038,6 +1169,13 @@ class SessionActivity : ComponentActivity(), SurfaceHolder.Callback {
         upscaler = SessionPrefs.upscaler(this)
         upscaleSharpness = SessionPrefs.upscaleSharpness(this)
         effects = SessionPrefs.screenEffects(this)
+        applyCardboard(SessionPrefs.cardboard(this))
+        // A switch left from before this activity (or this resume): SteamVR was running then, so the next
+        // "not running" hands the picture back.
+        if (SessionPrefs.cardboardSourceBeforeSteamVr(this) >= 0 && !steamVrSwitchedPicture) {
+            steamVrSwitchedPicture = true
+            steamVrSeenRunning = true
+        }
         textureAnisotropy = SessionPrefs.textureAnisotropy(this)
         textureLodBias = SessionPrefs.textureLodBias(this)
         val nextTouchMode = SessionPrefs.touchMode(this)
@@ -1214,6 +1352,7 @@ class SessionActivity : ComponentActivity(), SurfaceHolder.Callback {
         // Adreno imports dma-bufs with Turnip. Other supported GPUs use their system Vulkan drivers
         // to import the Android hardware buffers supplied by the runtime bridge.
         val turnip = TurnipDriver(this)
+        com.droiddeck.launcher.gpu.DriverSetupLog.write(this, "surface.driver-setup")
         val driverId = if (CompositorHost.isStarted) null else turnip.install()
 
         // The output size belongs to the session, not to the Surface: gamescope's display is
@@ -1243,6 +1382,8 @@ class SessionActivity : ComponentActivity(), SurfaceHolder.Callback {
         WaylandCompositor.nativeSetUpscaler(SessionPrefs.upscaler(this))
         WaylandCompositor.nativeSetUpscaleSharpness(SessionPrefs.upscaleSharpness(this))
         SessionPrefs.screenEffects(this).push(SessionPrefs.upscaler(this))
+        panelSizeMm().let { (w, h) -> SessionPrefs.cardboard(this).push(w, h) }
+        WaylandCompositor.nativeSetCardboardPoseFile(File(filesDir, ".wayland-rt/droiddeck-headpose").path)
         // The session's folder, claimed here because the compositor starts before the service and
         // opens its log once. The compositor reads the path from its environment; setting it after
         // it has started changes nothing, which is why the service copies the file in at teardown.
@@ -1280,6 +1421,7 @@ class SessionActivity : ComponentActivity(), SurfaceHolder.Callback {
             )
             Log.i(TAG, "hdr: " + (if (on) "on" else if (wanted) "wanted but ${probe.reason}" else "off") + " · display ${probe.formats.ifEmpty { "SDR" }}")
         }
+        com.droiddeck.launcher.gpu.DriverSetupLog.write(this, "compositor.start driver=$driverId")
         CompositorHost.startOrAttach(
             holder.surface, runtimeDir.path,
             driverId?.let { turnip.driverPath(it) }, driverId?.let { turnip.libraryName(it) },
@@ -1348,12 +1490,14 @@ class SessionActivity : ComponentActivity(), SurfaceHolder.Callback {
     /**
      * Follow screen on a large panel (a Fold's inner screen) may turn with the device: a window
      * locked to landscape on a squarer panel is letterboxed by the system itself, which no output
-     * size can undo. A phone-sized panel (the cover screen) stays landscape as before.
+     * size can undo. Every other case keeps the landscape orientation picked in Setup.
      */
     private fun applyFollowOrientation(config: android.content.res.Configuration) {
-        if (!SessionState.followScreen) return
-        val wanted = if (config.smallestScreenWidthDp >= 600) android.content.pm.ActivityInfo.SCREEN_ORIENTATION_USER
-            else android.content.pm.ActivityInfo.SCREEN_ORIENTATION_SENSOR_LANDSCAPE
+        val wanted = if (SessionState.followScreen && config.smallestScreenWidthDp >= 600) {
+            android.content.pm.ActivityInfo.SCREEN_ORIENTATION_USER
+        } else {
+            SessionPrefs.orientation(this)
+        }
         if (requestedOrientation != wanted) requestedOrientation = wanted
     }
 
@@ -1399,13 +1543,16 @@ class SessionActivity : ComponentActivity(), SurfaceHolder.Callback {
      * The rate of the mode PerfMode asked for, not the one the panel is still in: the switch lands
      * some frames after onCreate, and read too early it gave gamescope `-r 60` on a 120 Hz panel -
      * the client and every game then paced themselves to 60. (WinNative's requestedPanelRefreshRate.)
+     * Never above the user's peak refresh rate, which Android holds the panel to whatever mode is
+     * active; it is the rate gamescope gives Steam, and the QAM's Frame Limit divides it.
      */
     private fun refreshHz(): Float {
         val display = if (Build.VERSION.SDK_INT >= 30) display else windowManager.defaultDisplay
         val wanted = window.attributes.preferredDisplayModeId
         val hz = display?.supportedModes?.firstOrNull { wanted != 0 && it.modeId == wanted }?.refreshRate
             ?: display?.refreshRate ?: 60f
-        return if (hz > 1f) hz else 60f
+        val capped = minOf(hz, PerfMode.peakRefreshCap(this))
+        return if (capped > 1f) capped else 60f
     }
 
     /**
@@ -1640,7 +1787,7 @@ class SessionActivity : ComponentActivity(), SurfaceHolder.Callback {
             }
             return true
         }
-        if (pcKeyboardOpen && fromController) return super.dispatchKeyEvent(event)
+        if ((pcKeyboardOpen || achievementsOpen) && fromController) return super.dispatchKeyEvent(event)
         if (event.keyCode != KeyEvent.KEYCODE_BACK && padBridge?.onKeyEvent(event) == true) return true
         // A hardware keyboard, forwarded to the compositor's wl_keyboard. Back is left to the
         // activity, which opens the drawer.
@@ -1693,7 +1840,7 @@ class SessionActivity : ComponentActivity(), SurfaceHolder.Callback {
             return true
         }
         if (drawerDirectionKey != KeyEvent.KEYCODE_UNKNOWN) releaseDrawerDirection()
-        if (pcKeyboardOpen && PadBridge.isControllerMotionEvent(event)) return super.dispatchGenericMotionEvent(event)
+        if ((pcKeyboardOpen || achievementsOpen) && PadBridge.isControllerMotionEvent(event)) return super.dispatchGenericMotionEvent(event)
         if (padBridge?.onMotionEvent(event) == true) return true
         if (event.isFromSource(android.view.InputDevice.SOURCE_MOUSE) && !drawerOpen && onMouse(event)) return true
         return super.dispatchGenericMotionEvent(event)
@@ -2131,7 +2278,7 @@ class SessionActivity : ComponentActivity(), SurfaceHolder.Callback {
     private fun updatePointerCapture() {
         if (!::surfaceView.isInitialized) return
         val view = window.decorView
-        val want = pointerLocked && resumed && hasWindowFocus() && !drawerOpen && !pcKeyboardOpen && !pipUi && mouseAttached()
+        val want = pointerLocked && resumed && hasWindowFocus() && !drawerOpen && !pcKeyboardOpen && !achievementsOpen && !pipUi && mouseAttached()
         if (want == view.hasPointerCapture()) return
         if (want) view.requestPointerCapture() else view.releasePointerCapture()
     }
@@ -2303,6 +2450,7 @@ class SessionActivity : ComponentActivity(), SurfaceHolder.Callback {
         if (show) {
             drawerOpen = false
             pcKeyboardOpen = false
+            achievementsOpen = false
             pendingBackAction?.let(uiHandler::removeCallbacks)
             pendingBackAction = null
             releaseDrawerDirection()
@@ -2400,7 +2548,7 @@ class SessionActivity : ComponentActivity(), SurfaceHolder.Callback {
 
     override fun onResume() {
         super.onResume()
-        requestedOrientation = SessionPrefs.orientation(this)
+        applyFollowOrientation(resources.configuration)
         if (runtimeRemovalBlocked) return
         com.droiddeck.launcher.ui.Motion.refresh(this)
         refreshHomeApp()
@@ -2410,6 +2558,7 @@ class SessionActivity : ComponentActivity(), SurfaceHolder.Callback {
         }
         (getSystemService(INPUT_SERVICE) as? InputManager)
             ?.registerInputDeviceListener(deviceListener, Handler(Looper.getMainLooper()))
+        if (SessionState.guestPid > 1) padBridge?.syncConnectedControllers()
         onScreenControls?.reload()
         controllerSettings = ControllerPrefs.read(this)
         updateOnScreenControls()
@@ -2420,6 +2569,7 @@ class SessionActivity : ComponentActivity(), SurfaceHolder.Callback {
         readPrefs()
         if (::pip.isInitialized) pip.resumed()
         if (CompositorHost.isStarted) applyFrameGen()
+        SessionPrefs.sessionPrefs(this).registerOnSharedPreferenceChangeListener(cardboardPrefListener)
     }
 
     override fun onPause() {
@@ -2429,6 +2579,7 @@ class SessionActivity : ComponentActivity(), SurfaceHolder.Callback {
         // drawer's dim layer can otherwise remain over Steam when this activity returns.
         drawerOpen = false
         pcKeyboardOpen = false
+        achievementsOpen = false
         (getSystemService(INPUT_SERVICE) as? InputManager)?.unregisterInputDeviceListener(deviceListener)
         releaseDrawerDirection()
         // A button held when the app goes away would stay held in the ring for the whole session.
@@ -2437,7 +2588,101 @@ class SessionActivity : ComponentActivity(), SurfaceHolder.Callback {
         updatePointerCapture()
         updatePadMotion()
         keyboard?.takeIf { it.shown }?.hide()
+        SessionPrefs.sessionPrefs(this).unregisterOnSharedPreferenceChangeListener(cardboardPrefListener)
+        updateHeadTracker()
         super.onPause()
+    }
+
+    /** SteamVR for Cardboard mode: install, start or stop it in the guest. Starting switches the
+     *  picture to side-by-side, which is what SteamVR draws. */
+    private fun steamVrAction(action: String) {
+        if (action == "start") {
+            switchPictureForSteamVr()
+            steamVrSeenRunning = false
+        }
+        if (action == "stop") restoreSteamVrPicture()
+        if (action == "install") steamVrStatus = SteamVr.Status.INSTALLING
+        Thread({
+            val ok = SteamVr.run(this, action)
+            val now = SteamVr.status(this)
+            uiHandler.post {
+                // A start that failed leaves nothing side-by-side to show: the picture goes back.
+                if (!ok && action == "start" && now != SteamVr.Status.RUNNING) restoreSteamVrPicture()
+                onSteamVrStatus(now)
+                if (!ok) Toast.makeText(this, getString(R.string.cardboard_steamvr_failed), Toast.LENGTH_LONG).show()
+            }
+        }, "steamvr-$action").start()
+    }
+
+    /** SteamVR draws a side-by-side pair: the picture switches to that, remembering what it was. */
+    private fun switchPictureForSteamVr() {
+        if (cardboard.source != Cardboard.SOURCE_SBS) {
+            SessionPrefs.setCardboardSourceBeforeSteamVr(this, cardboard.source)
+            val c = cardboard.copy(source = Cardboard.SOURCE_SBS)
+            SessionPrefs.setCardboard(this, c)
+            applyCardboard(c)
+        }
+        steamVrSwitchedPicture = SessionPrefs.cardboardSourceBeforeSteamVr(this) >= 0
+    }
+
+    private fun onSteamVrStatus(now: SteamVr.Status) {
+        steamVrStatus = now
+        // Started some other way than the drawer (a script, a VR game): the picture follows it all the same.
+        if (now == SteamVr.Status.RUNNING && cardboard.enabled && !steamVrSwitchedPicture &&
+            cardboard.source != Cardboard.SOURCE_SBS) {
+            switchPictureForSteamVr()
+            steamVrSeenRunning = true
+        }
+        if (!steamVrSwitchedPicture) return
+        if (now == SteamVr.Status.RUNNING) steamVrSeenRunning = true
+        else if (steamVrSeenRunning && now != SteamVr.Status.UNAVAILABLE) restoreSteamVrPicture()
+    }
+
+    /** SteamVR stopped: the Cardboard picture goes back to what it was before Start. */
+    private fun restoreSteamVrPicture() {
+        val before = SessionPrefs.cardboardSourceBeforeSteamVr(this)
+        SessionPrefs.setCardboardSourceBeforeSteamVr(this, -1)
+        steamVrSwitchedPicture = false
+        steamVrSeenRunning = false
+        if (before < 0 || cardboard.source == before) return
+        val c = cardboard.copy(source = before)
+        SessionPrefs.setCardboard(this, c)
+        applyCardboard(c)
+    }
+
+    /** Cardboard mode: hand the settings to the compositor and run the head tracker while it needs one. */
+    private fun applyCardboard(c: Cardboard) {
+        val was = cardboard
+        cardboard = c
+        if (CompositorHost.isStarted) panelSizeMm().let { (w, h) -> c.push(w, h) }
+        if (c.enabled && !was.enabled) headTracker?.recenter()
+        updateHeadTracker()
+    }
+
+    private fun updateHeadTracker() {
+        // Side-by-side sources track too: the compositor leaves their picture alone, but whoever renders
+        // it (the SteamVR driver, tools/vr) reads the pose from the shared file.
+        val want = resumed && cardboard.enabled && cardboard.headTracking
+        if (want) {
+            val t = headTracker ?: HeadTracker(this) {
+                @Suppress("DEPRECATION")
+                (if (Build.VERSION.SDK_INT >= 30) display else windowManager.defaultDisplay)?.rotation ?: android.view.Surface.ROTATION_0
+            }.also { headTracker = it }
+            t.start()
+        } else {
+            headTracker?.stop()
+        }
+    }
+
+    /** The panel's physical size in millimetres, long side first, for lining the eyes up with the lenses. */
+    private fun panelSizeMm(): Pair<Float, Float> {
+        val dm = resources.displayMetrics
+        val landscape = dm.widthPixels >= dm.heightPixels
+        val longPx = maxOf(dm.widthPixels, dm.heightPixels).toFloat()
+        val shortPx = minOf(dm.widthPixels, dm.heightPixels).toFloat()
+        val longDpi = if (landscape) dm.xdpi else dm.ydpi
+        val shortDpi = if (landscape) dm.ydpi else dm.xdpi
+        return (if (longDpi > 0f) longPx / longDpi * 25.4f else 0f) to (if (shortDpi > 0f) shortPx / shortDpi * 25.4f else 0f)
     }
 
     override fun onAttachedToWindow() {
@@ -2603,3 +2848,6 @@ class SessionActivity : ComponentActivity(), SurfaceHolder.Callback {
         )
     }
 }
+
+/** [progress]: (unlocked, total) from the cached list. */
+private class AchievementsInFront(val game: StoreAchievements.Game, val title: String, val progress: Pair<Int, Int>?)

@@ -70,6 +70,7 @@ import androidx.compose.ui.draw.clip
 import androidx.compose.ui.draw.clipToBounds
 import androidx.compose.ui.draw.drawBehind
 import androidx.compose.ui.focus.focusRequester
+import androidx.compose.ui.focus.focusProperties
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.geometry.Rect
 import androidx.compose.ui.graphics.Brush
@@ -85,7 +86,10 @@ import androidx.compose.ui.layout.onSizeChanged
 import androidx.compose.ui.layout.positionInRoot
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalDensity
+import androidx.compose.ui.platform.LocalFocusManager
 import androidx.compose.ui.platform.LocalInputModeManager
+import androidx.compose.ui.platform.LocalSoftwareKeyboardController
+import androidx.compose.ui.platform.LocalView
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.semantics.contentDescription
@@ -267,8 +271,9 @@ private fun SetupButton(s: FrontEndState, busy: Boolean, full: Dp, ring: Int, on
 
 // ---- storefront ------------------------------------------------------------------------------------
 
+@OptIn(androidx.compose.ui.ExperimentalComposeUiApi::class)
 @Composable
-private fun Storefront(s: FrontEndState, a: FrontEndActions) {
+internal fun Storefront(s: FrontEndState, a: FrontEndActions) {
     val ctx = LocalContext.current
     val narrow = LocalNarrowPane.current
     val colors = MaterialTheme.colorScheme
@@ -290,6 +295,9 @@ private fun Storefront(s: FrontEndState, a: FrontEndActions) {
     }
     val ff = LocalFrontFocus.current
     val inputMode = LocalInputModeManager.current
+    val focusManager = LocalFocusManager.current
+    val keyboard = LocalSoftwareKeyboardController.current
+    val view = LocalView.current
     // Cards, where they are, for the page that opens from one.
     val cards = remember { HashMap<String, Rect>() }
     var viewportAt by remember { mutableStateOf(Offset.Zero) }
@@ -300,6 +308,11 @@ private fun Storefront(s: FrontEndState, a: FrontEndActions) {
     LaunchedEffect(openApp) {
         val id = openApp
         if (id != null) {
+            // The grid stays composed for the return animation. Release its native search field
+            // before covering it, so its focus ring and keyboard do not follow onto the app page.
+            focusManager.clearFocus(force = true)
+            view.findFocus()?.clearFocus()
+            keyboard?.hide()
             detailFrom = cards[id]?.let { Origin(it.translate(-viewportAt), 16f * density.density) }
             leaving = false
             detail = id
@@ -350,7 +363,10 @@ private fun Storefront(s: FrontEndState, a: FrontEndActions) {
         Spacer(Modifier.height(8.dp))
         Box(Modifier.weight(1f).fillMaxWidth().clipToBounds().onGloballyPositioned { viewportAt = it.positionInRoot() }) {
             Column(
-                Modifier.fillMaxSize().graphicsLayer { scaleX = sink; scaleY = sink; alpha = fade }.verticalScroll(rememberScrollState()).padding(bottom = 16.dp),
+                Modifier.fillMaxSize().focusProperties {
+                    enter = { if (detail == null) androidx.compose.ui.focus.FocusRequester.Default else androidx.compose.ui.focus.FocusRequester.Cancel }
+                }.focusGroup()
+                    .graphicsLayer { scaleX = sink; scaleY = sink; alpha = fade }.verticalScroll(rememberScrollState()).padding(bottom = 16.dp),
             ) {
                 val open: (String) -> Unit = { openApp = it }
                 when (mode) {
@@ -392,7 +408,6 @@ private fun FlathubChips(mode: String, modes: List<String>, installed: Int, upda
     val bounds = remember { mutableStateMapOf<String, Rect>() }
     val tint = rememberUpdatedState(pal.signal)
     Box(Modifier.fillMaxWidth()) {
-        ChipGlide(modes.indexOf(mode), bounds[mode], tint)
         Row(horizontalArrangement = Arrangement.spacedBy(8.dp), verticalAlignment = Alignment.CenterVertically, modifier = Modifier.fillMaxWidth()) {
             for (m in modes) {
                 key(m) {
@@ -400,6 +415,8 @@ private fun FlathubChips(mode: String, modes: List<String>, installed: Int, upda
                     val hot = rememberHot(src)
                     val shape = RoundedCornerShape(99.dp)
                     val on = m == mode
+                    // Drawn by the row's glide by touch only; with a pad its own rest look and the bar.
+                    val under = on && androidx.compose.ui.platform.LocalInputModeManager.current.inputMode != androidx.compose.ui.input.InputMode.Keyboard
                     Row(
                         verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp, Alignment.CenterHorizontally),
                         modifier = Modifier.weight(1f).paneItem("flathub:$m")
@@ -408,8 +425,9 @@ private fun FlathubChips(mode: String, modes: List<String>, installed: Int, upda
                                 if (m == MODE_INSTALLED) FlathubMotion.installedChip = it.boundsInRoot()
                             }
                             .heightIn(min = 44.dp).clip(shape)
-                            .background(if (on) Color.Transparent else colors.surface)
-                            .glideBorder(hot, shape, pal.signal, if (on) Color.Transparent else pal.line)
+                            .background(if (under) Color.Transparent else colors.surface)
+                            .shownBar(on, pal.signal)
+                            .glideBorder(hot, shape, pal.signal, if (under) Color.Transparent else pal.line)
                             .hoverable(src).clickable(interactionSource = src, indication = LocalIndication.current, role = Role.Tab) { onPick(m) }
                             .controllerConfirm { onPick(m) }
                             .padding(horizontal = 12.dp, vertical = 8.dp),
@@ -428,6 +446,8 @@ private fun FlathubChips(mode: String, modes: List<String>, installed: Int, upda
                 }
             }
         }
+        // Over the chips: under them, their rest fill hid it as it crossed them.
+        ChipGlide(modes.indexOf(mode), bounds[mode], tint)
     }
 }
 

@@ -41,3 +41,4 @@ __pycache__/
 .signing.env
 app/src/main/assets/directaudio/
 app/src/main/assets/hybris/
+/tools/vr/out/

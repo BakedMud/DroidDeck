@@ -20,15 +20,16 @@
  * separately exercises the actual query on Android. */
 #define TEST_FD_LIMIT 65536
 static _Atomic unsigned identities[TEST_FD_LIMIT];
+static struct f_owner_ex owners[TEST_FD_LIMIT];
 static unsigned identity_serial = 1;
-static int identity_denied, kgsl_present;
+static int identity_denied, owner_denied, owner_probe_delay, kgsl_present;
 static int kernel_error = EINVAL;
 static int native_imports, native_exports, native_closes;
 static const char *driver_name = "pvr";
 static const char *pvr_node = "/dev/dri/renderD129";
 static int fixture_stat(const char *path, struct stat *st);
 static long fixture_syscall(long number, ...);
-static int fixture_fcntl(int fd, int op, int arg);
+static int fixture_fcntl(int fd, int op, ...);
 static void *fixture_dlsym(void *object, const char *name);
 static int fixture_close(int fd);
 
@@ -68,9 +69,27 @@ static int fixture_stat(const char *path, struct stat *st) {
   return stat(path, st);
 }
 
-/* The intercepted DRM calls all take an integer argument. Keep that contract
- * explicit; native_import's argument-free F_GETFD uses libc after #undef above. */
-static int fixture_fcntl(int fd, int op, int arg) {
+static int fixture_fcntl(int fd, int op, ...) {
+  va_list ap;
+  va_start(ap, op);
+  if (op == F_GETOWN_EX || op == F_SETOWN_EX) {
+    struct f_owner_ex *owner = va_arg(ap, struct f_owner_ex *);
+    va_end(ap);
+    if (owner_denied) { errno = EINVAL; return -1; }
+    if (fd < 0 || fd >= TEST_FD_LIMIT || !identities[fd] || !owner) {
+      errno = EBADF;
+      return -1;
+    }
+    if (op == F_GETOWN_EX) {
+      *owner = owners[identities[fd]];
+    } else {
+      owners[identities[fd]] = *owner;
+      if (owner_probe_delay && owner->pid) usleep(1000);
+    }
+    return 0;
+  }
+  int arg = va_arg(ap, int);
+  va_end(ap);
   if (op == F_DUPFD_QUERY) {
     if (identity_denied) { errno = EINVAL; return -1; }
     if (fd < 0 || arg < 0 || fd >= TEST_FD_LIMIT || arg >= TEST_FD_LIMIT ||
@@ -144,6 +163,24 @@ static void empty_table(void) {
   for (int i = 0; i < MAX_HANDLES; ++i) assert(!handle_entries[i].handle);
 }
 
+struct fallback_stress {
+  int drm;
+  int dma;
+  int failures;
+};
+
+static void *stress_fallback_imports(void *opaque) {
+  struct fallback_stress *stress = opaque;
+  for (int i = 0; i < 20; i++) {
+    uint32_t handle = 0;
+    if (drmPrimeFDToHandle(stress->drm, stress->dma, &handle) != 0 ||
+        drmCloseBufferHandle(stress->drm, handle) != 0) {
+      stress->failures++;
+    }
+  }
+  return NULL;
+}
+
 int main(void) {
   int drm = test_open("/dev/null"), dma = test_open("/dev/zero");
   uint32_t handle = 0;
@@ -176,8 +213,37 @@ int main(void) {
 
   int baseline = count_fds();
   identity_denied = 1;
+  assert(drmPrimeFDToHandle(drm, dma, &handle) == 0 && (handle & PVR_HANDLE_BIT));
+  int denied_alias = fixture_fcntl(drm, F_DUPFD_CLOEXEC, 0), denied_out = -1;
+  int denied_separate = test_open("/dev/null");
+  assert(drmPrimeHandleToFD(denied_separate, handle, O_CLOEXEC, &denied_out) != 0);
+  assert(drmPrimeHandleToFD(denied_alias, handle, O_CLOEXEC, &denied_out) == 0);
+  fixture_close(denied_out);
+  assert(drmCloseBufferHandle(denied_alias, handle) == 0);
+  fixture_close(denied_alias);
+  fixture_close(denied_separate);
+  assert(count_fds() == baseline);
+  owner_denied = 1;
   assert(drmPrimeFDToHandle(drm, dma, &handle) == -EOPNOTSUPP);
   assert(count_fds() == baseline);
+  owner_denied = 0;
+
+  /* Marker changes and restoration must be atomic across concurrent imports of one DRM OFD. */
+  owner_probe_delay = 1;
+  struct fallback_stress stress[8];
+  pthread_t workers[8];
+  for (int i = 0; i < 8; i++) {
+    stress[i] = (struct fallback_stress){.drm = drm, .dma = dma};
+    assert(pthread_create(&workers[i], NULL, stress_fallback_imports, &stress[i]) == 0);
+  }
+  for (int i = 0; i < 8; i++) {
+    assert(pthread_join(workers[i], NULL) == 0);
+    assert(stress[i].failures == 0);
+  }
+  owner_probe_delay = 0;
+  assert(owners[identities[drm]].pid == 0);
+  assert(count_fds() == baseline);
+  empty_table();
   identity_denied = 0;
 
   assert(drmPrimeFDToHandle(drm, dma, &handle) == 0 && (handle & PVR_HANDLE_BIT));

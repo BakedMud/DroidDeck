@@ -22,6 +22,11 @@ if [ "$#" -ge 2 ] && [[ "$1" =~ ^(0[xX])?[0-9a-fA-F]+$ ]] &&
     # on this X11 path. Use a software surface only for the identified Steam helper.
     export SDL_FRAMEBUFFER_ACCELERATION=0
   fi
+  # Valve's helper script disables Kopper, but the managed system-Vulkan Steam path needs Kopper
+  # so Zink presents through the explicit WSI layer instead of the scrambled DRI3 path.
+  if [ "${BL_STEAM_GL_WSI_ACTIVE:-}" = 1 ]; then
+    unset LIBGL_KOPPER_DISABLE
+  fi
   exec -- "$@"
 fi
 # Queries, existing-process changes, and other programs retain taskset's behavior.
