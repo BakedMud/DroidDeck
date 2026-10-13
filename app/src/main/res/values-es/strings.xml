@@ -1955,7 +1955,7 @@
     <string name="turnip_reject_library_missing">meta.json indica %1$s, que no está en el zip</string>
     <string name="turnip_reject_not_aarch64">%1$s no es una biblioteca compartida ELF AArch64 de 64 bits</string>
     <string name="turnip_reject_glibc">%1$s enlaza glibc - es un Turnip \"-Linux\", que va en \"Controlador de runtime\"</string>
-    <string name="lvd_no_library">No hay ningún libvulkan_freedreno*.so en este zip. Un zip de Turnip para Android (AdrenoTools) o -Wayland no es un controlador de runtime de Linux.</string>
+    <string name="lvd_no_library">No hay ningún libvulkan_*.so en este zip. Un zip de Turnip para Android (AdrenoTools) o -Wayland no es un controlador de runtime de Linux.</string>
     <string name="lvd_not_aarch64">%1$s no es una biblioteca compartida ELF AArch64 de 64 bits.</string>
     <string name="lvd_not_glibc">%1$s no es un controlador glibc: enlaza la libc de Android. El runtime de Linux necesita un zip \"-Linux\"; el cliente de Steam no puede cargar en absoluto un Turnip normal o \"-Wayland\".</string>
     <string name="bundle_no_manifest">No es un paquete de controladores: no hay un manifest.json que indique un controlador android y uno linux</string>

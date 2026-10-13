@@ -154,6 +154,8 @@ class FrontEndState(
 class FrontEndActions(
     val onPlay: () -> Unit,
     val onPlayDesktopUi: () -> Unit,
+    /** Open Steam's own account controls; its client owns sign-out and saved credentials. */
+    val onManageSteamAccount: () -> Unit = {},
     val onSteamGame: (Library.SteamGame) -> Unit,
     val onGameShortcut: (Library.SteamGame) -> Unit = {},
     val onExportGameFile: (Library.SteamGame) -> Unit = {},

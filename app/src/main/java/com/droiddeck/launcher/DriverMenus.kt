@@ -67,7 +67,6 @@ internal class DriverMenus(private val activity: Activity, private val ui: Handl
         linuxDownloads = linuxDownloads, androidDownloads = androidDownloads, canRestoreBundled = canRestoreBundled,
         activeBundle = activeBundle, powerVr = gpu.family == GpuInfo.Family.POWERVR,
         systemPowerVr = SystemVulkanDriver.usesDefault(linuxSelected),
-        canImportDrivers = com.droiddeck.launcher.core.DeviceSupport.adreno(),
     )
     var androidRows by mutableStateOf<List<DriverRow>>(emptyList())
     var androidSelected by mutableStateOf("")

@@ -1915,7 +1915,7 @@
     <string name="turnip_reject_library_missing">meta.json 指定了 %1$s，但它不在 zip 包中</string>
     <string name="turnip_reject_not_aarch64">%1$s 不是 64 位 AArch64 ELF 共享库</string>
     <string name="turnip_reject_glibc">%1$s 链接了 glibc — 这是“-Linux”Turnip，应在“运行时驱动”下导入</string>
-    <string name="lvd_no_library">此 zip 包中没有 libvulkan_freedreno*.so。Android（AdrenoTools）或 -Wayland Turnip zip 包不是 Linux 运行时驱动。</string>
+    <string name="lvd_no_library">此 zip 包中没有 libvulkan_*.so。Android（AdrenoTools）或 -Wayland Turnip zip 包不是 Linux 运行时驱动。</string>
     <string name="lvd_not_aarch64">%1$s 不是 64 位 AArch64 ELF 共享库。</string>
     <string name="lvd_not_glibc">%1$s 不是 glibc 驱动 — 它链接的是 Android 的 libc。Linux 运行时需要“-Linux”zip 包；普通或“-Wayland”Turnip 完全无法被 Steam 客户端加载。</string>
     <string name="bundle_no_manifest">不是驱动组合包：没有指定 Android 和 Linux 驱动的 manifest.json</string>

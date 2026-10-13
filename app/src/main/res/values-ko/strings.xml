@@ -1915,7 +1915,7 @@
     <string name="turnip_reject_library_missing">meta.json에 지정된 %1$s이(가) zip에 없습니다</string>
     <string name="turnip_reject_not_aarch64">%1$s은(는) 64비트 AArch64 ELF 공유 라이브러리가 아닙니다</string>
     <string name="turnip_reject_glibc">%1$s은(는) glibc에 링크되어 있습니다. \"-Linux\" Turnip이므로 \"Linux 런타임 드라이버\"에서 가져오세요</string>
-    <string name="lvd_no_library">이 zip에 libvulkan_freedreno*.so가 없습니다. Android(AdrenoTools)용 또는 -Wayland Turnip zip은 Linux 런타임 드라이버가 아닙니다.</string>
+    <string name="lvd_no_library">이 zip에 libvulkan_*.so가 없습니다. Android(AdrenoTools)용 또는 -Wayland Turnip zip은 Linux 런타임 드라이버가 아닙니다.</string>
     <string name="lvd_not_aarch64">%1$s은(는) 64비트 AArch64 ELF 공유 라이브러리가 아닙니다.</string>
     <string name="lvd_not_glibc">%1$s은(는) glibc 드라이버가 아니며 Android의 libc에 링크되어 있습니다. Linux 런타임에는 \"-Linux\" zip이 필요합니다. 일반 또는 \"-Wayland\" Turnip은 Steam 클라이언트에서 전혀 불러올 수 없습니다.</string>
     <string name="bundle_no_manifest">드라이버 번들이 아닙니다: android 및 linux 드라이버를 지정하는 manifest.json이 없습니다</string>

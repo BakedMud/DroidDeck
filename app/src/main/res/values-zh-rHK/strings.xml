@@ -1915,7 +1915,7 @@
     <string name="turnip_reject_library_missing">meta.json 指明了 %1$s，但 zip 中沒有此檔案</string>
     <string name="turnip_reject_not_aarch64">%1$s 不是 64 位元 AArch64 ELF 共用程式庫</string>
     <string name="turnip_reject_glibc">%1$s 連結 glibc - 這是「-Linux」Turnip，應在「運行環境驅動程式」下匯入</string>
-    <string name="lvd_no_library">此 zip 中沒有 libvulkan_freedreno*.so。Android (AdrenoTools) 或 -Wayland Turnip zip 不是 Linux 運行環境驅動程式。</string>
+    <string name="lvd_no_library">此 zip 中沒有 libvulkan_*.so。Android (AdrenoTools) 或 -Wayland Turnip zip 不是 Linux 運行環境驅動程式。</string>
     <string name="lvd_not_aarch64">%1$s 不是 64 位元 AArch64 ELF 共用程式庫。</string>
     <string name="lvd_not_glibc">%1$s 不是 glibc 驅動程式 - 它連結的是 Android 的 libc。Linux 運行環境需要「-Linux」zip；Steam 用戶端完全無法載入一般或「-Wayland」Turnip。</string>
     <string name="bundle_no_manifest">不是驅動程式組合包：沒有指明 Android 和 Linux 驅動程式的 manifest.json</string>

@@ -1915,7 +1915,7 @@
     <string name="turnip_reject_library_missing">meta.jsonで指定された%1$sがzipに含まれていません</string>
     <string name="turnip_reject_not_aarch64">%1$sは64ビットAArch64 ELF共有ライブラリではありません</string>
     <string name="turnip_reject_glibc">%1$sはglibcにリンクしています。これは「-Linux」Turnipなので、「ランタイムドライバー」でインポートしてください</string>
-    <string name="lvd_no_library">このzipにはlibvulkan_freedreno*.soがありません。Android（AdrenoTools）用や-WaylandのTurnip zipはLinuxランタイムドライバーではありません。</string>
+    <string name="lvd_no_library">このzipにはlibvulkan_*.soがありません。Android（AdrenoTools）用や-WaylandのTurnip zipはLinuxランタイムドライバーではありません。</string>
     <string name="lvd_not_aarch64">%1$sは64ビットAArch64 ELF共有ライブラリではありません。</string>
     <string name="lvd_not_glibc">%1$sはglibcドライバーではなく、Androidのlibcにリンクしています。Linux実行環境には「-Linux」zipが必要です。通常版や「-Wayland」のTurnipはSteamクライアントでは一切読み込めません。</string>
     <string name="bundle_no_manifest">ドライバーバンドルではありません：androidドライバーとlinuxドライバーを指定するmanifest.jsonがありません</string>
