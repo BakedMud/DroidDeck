@@ -84,6 +84,14 @@ class DxvkXclipseBcFormatsTest(unittest.TestCase):
             PATCH, "src/d3d9/d3d9_interface.cpp"))
         self.assertIn("checkD3dBcFormatSupport", d3d11)
 
+    def test_pinned_legacy_source_has_modern_toolchain_includes_and_official_tag(self):
+        config = file_diff(PATCH, "src/util/config/config.cpp")
+        self.assertIn("+#include <algorithm>", config)
+        build = (ROOT / "tools/dxvk/build_xclipse.sh").read_text()
+        self.assertIn("refs/tags/v$DXVK_XCLIPSE_VERSION:refs/tags/v$DXVK_XCLIPSE_VERSION", build)
+        self.assertIn("DXVK_XCLIPSE_TAG_OBJECT", build)
+        self.assertNotIn('git -C "$source" tag ', build)
+
 
 if __name__ == "__main__":
     unittest.main()

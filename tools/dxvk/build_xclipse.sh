@@ -203,11 +203,13 @@ inside_container() {
 
   mkdir -p "$source" "$crossfiles" "$payload"
   git -C "$source" init -q
-  git -C "$source" fetch --depth=1 https://github.com/doitsujin/dxvk.git "$DXVK_XCLIPSE_REVISION"
-  git -C "$source" checkout -q --detach FETCH_HEAD
+  git -C "$source" fetch --depth=1 https://github.com/doitsujin/dxvk.git \
+    "refs/tags/v$DXVK_XCLIPSE_VERSION:refs/tags/v$DXVK_XCLIPSE_VERSION"
+  test "$(git -C "$source" rev-parse "v$DXVK_XCLIPSE_VERSION")" = "$DXVK_XCLIPSE_TAG_OBJECT"
+  test "$(git -C "$source" rev-parse "v$DXVK_XCLIPSE_VERSION^{}")" = "$DXVK_XCLIPSE_REVISION"
+  git -C "$source" checkout -q --detach "$DXVK_XCLIPSE_REVISION"
   test "$(git -C "$source" rev-parse HEAD)" = "$DXVK_XCLIPSE_REVISION"
   git -C "$source" submodule update --init --recursive --depth=1
-  git -C "$source" tag "v$DXVK_XCLIPSE_VERSION"
   export SOURCE_DATE_EPOCH
   SOURCE_DATE_EPOCH=$(git -C "$source" show -s --format=%ct HEAD)
 
