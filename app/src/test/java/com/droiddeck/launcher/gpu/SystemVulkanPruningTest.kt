@@ -59,6 +59,17 @@ class SystemVulkanPruningTest {
         assertEquals("current ICD", File(old, "icd.json").readText())
     }
 
+    @Test fun missingBundledMaliFilePreservesPreviousRuntime() {
+        val base = temporary.newFolder("system_vulkan")
+        val current = completeRuntime(base, "a".repeat(64))
+        val old = completeRuntime(base, "b".repeat(64))
+        File(current, "dxvk-mali/aarch64-windows/dxgi.dll").delete()
+
+        SystemVulkanDriver.pruneUnused(current, true)
+
+        assertTrue("incomplete replacement must preserve the old runtime", old.isDirectory)
+    }
+
     @Test fun deletingOldRuntimeDoesNotFollowItsSymlinks() {
         val base = temporary.newFolder("system_vulkan")
         val current = completeRuntime(base, "a".repeat(64))
@@ -101,7 +112,10 @@ class SystemVulkanPruningTest {
         ) + listOf("x32", "x64").flatMap { arch ->
             listOf("d3d8", "d3d9", "d3d10core", "d3d11", "dxgi").map { "dxvk/$arch/$it.dll" }
         }
-        components.forEach { path -> File(directory, path).apply { parentFile!!.mkdirs(); writeText("component") } }
+        val mali = listOf("i386-windows", "x86_64-windows", "aarch64-windows").flatMap { arch ->
+            listOf("d3d8", "d3d9", "d3d10core", "d3d11", "dxgi").map { "dxvk-mali/$arch/$it.dll" }
+        }
+        (components + mali).forEach { path -> File(directory, path).apply { parentFile!!.mkdirs(); writeText("component") } }
         File(directory, "run-proton.py").setExecutable(true)
         File(directory, "icd.json").writeText("current ICD")
         return directory
