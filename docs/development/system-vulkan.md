@@ -10,9 +10,9 @@ DroidDeck's `android_wlegl` / Android hardware buffer receiver.
 | HAL under `/vendor/lib64/hw/` | `vulkan.powervr.so` | `vulkan.samsung.so` | `vulkan.mali.so` |
 | DRM | Accessible, identifiable PowerVR render node | Accessible, identifiable `sgpu` render node | No DRM-node requirement or handle emulation |
 | Inner X11 presentation | Existing DRI3/Steam GL profile | Existing DRI3/Steam GL profile | Bundled X11 WSI with `WSI_X11_FORCE_SHM=1` |
-| Proton DXVK | Managed patched `dxvk` | Managed upstream `dxvk-2.6.2` for 128-byte push constants | User-selected Proton/DXVK; WineD3D preference preserved |
+| Proton DXVK | Managed patched `dxvk` | Managed patched `dxvk-2.6.2` for 128-byte push constants | Managed experimental `dxvk-mali`, guarded to Mali-G715 driver 54.3.0 |
 | Session / game compatibility layers | compat / WSI + compat | compat / WSI + compat | compat / WSI + compat |
-| Session / managed-game BC emulation | Existing policy / `dxvk` | `0` / `dxvk` | Existing policy / user-controlled |
+| Session / managed-game BC emulation | Existing policy / `dxvk` | `0` / `dxvk` | Existing policy / `dxvk` |
 
 X11 layer settings are applied after the outer Gamescope launch, including direct
 program and desktop sessions. `droiddeck-gpu` restores the Wayland bridge settings
@@ -35,12 +35,16 @@ with a managed DXVK payload, or native presentation with a user-selected payload
 
 `DROIDDECK_HYBRIS_LAYERS` separately specifies game compatibility layers;
 `DROIDDECK_HYBRIS_LAYER_PATH` adds their directory, and `DROIDDECK_HYBRIS_DXVK`
-names the managed DXVK payload. The X11 WSI layer is added only for inner clients.
+names the managed DXVK payload. Mali Auto also sets `DXVK_MALI_COMPAT=1`; the
+payload still enforces its exact GPU and driver identity. The X11 WSI layer is added
+only for inner clients.
 Xclipse uses the shared compatibility layer throughout. Its outer/session environment
 sets `HYBRIS_BC_TEXTURES=0`; managed game launches override it to `dxvk` in their
 own process environment, and nested compositors restore the session policy.
-Absent or empty capability fields retain older defaults: Mali uses `x11-shm`/`user`,
-and other system profiles use `native`/`managed`. The old
+Absent or empty capability fields retain legacy helper defaults: Mali uses
+`x11-shm`/`user`, and other system profiles use `native`/`managed`. The current app
+passes explicit `x11-shm`/`managed` fields for Mali Auto; those legacy defaults do
+not describe its current selection. The old
 `DROIDDECK_POWERVR_RUNTIME` alias remains available for PowerVR and Xclipse helpers.
 Manual driver selections retain their existing behavior.
 
@@ -53,26 +57,55 @@ Android compositor
 
 ## Runtime compatibility ownership
 
-The app now selects the shared `VK_LAYER_HYBRIS_compat` layer for Xclipse and no
-longer stages or enables the standalone Xclipse layer. The runtime is pinned to
-[component release `78831b13`](https://github.com/wallentx/DroidDeck/releases/tag/hybris-78831b134c818e9d1077a8b73a11364c3d47d36d),
-built by [component CI](https://github.com/wallentx/DroidDeck/actions/runs/38223214145).
+The app selects the shared `VK_LAYER_HYBRIS_compat` layer for all three profiles;
+it no longer stages or enables a standalone Xclipse layer. The runtime uses
+[component release `fdaed477`](https://github.com/wallentx/DroidDeck/releases/tag/hybris-fdaed47732a466add2dfc8b530d1bd9d9c916941),
+built by [component CI](https://github.com/wallentx/DroidDeck/actions/runs/38475082027).
 `tools/powervr/release.json` records the verified archive and tree checksums, recipe
 inputs, producer commit, and upstream source revision.
 
-Common/ICD code prepares the selected Android HAL, including the Xclipse shader
-compiler's bionic environment. The shared compatibility layer handles Vulkan call
-and feature workarounds, with Xclipse changes gated by the selected HAL and physical
-device. PowerVR and Mali retain their existing BC policy; Xclipse disables BC
-emulation in the outer/session path and enables its DXVK profile only for managed
-games. The 128-byte push-constant limit still selects DXVK 2.6.2.
+The pinned libhybris source already supplies the Android linker, Bionic TLS,
+hardware-buffer/gralloc bridge, Vulkan forwarding, and Wayland WSI. DroidDeck's
+downstream patch adds independently selected workarounds inside that foundation.
+This is an in-tree extension contract, not an external plugin ABI.
+
+```text
+App GPU profile
+  +-- HAL / DRM / presentation / layer / DXVK choices
+  `-- Common runtime and launch helpers
+        +-- libhybris ICD: Android loader and HAL preparation
+        +-- shared compatibility layer: physical/device policy
+        `-- WSI and DXVK: presentation and Direct3D requirements
+```
+
+| Behavior | Owner and selection | Native behavior preserved |
+| --- | --- | --- |
+| Bionic environment preparation | Common/ICD path, before loading any explicitly selected HAL | Preserve an existing environment; initialize once with a process-lifetime copy and retry allocation failures |
+| Xclipse per-format BC handling | Shared layer; Samsung HAL, Xclipse device name, missing native BC, and active decoder policy | Keep the complete `textureCompressionBC` feature false when the decoder cannot fulfill its full contract |
+| Immutable YCbCr sampler handling | Shared layer; Samsung HAL, Xclipse device name, and native sampler-YCbCr capability | Restrict handling to applicable combined-image-sampler bindings; maintain per-device sampler lifetime |
+| Calibrated timestamp aliases | Shared layer; both KHR and EXT advertised, with a missing KHR command and an available EXT command | Prefer each native KHR command independently; device fallback also requires enabled KHR and EXT extensions |
+| Feature request rewriting | Shared layer; only an implemented, selected emulation | Preserve the caller's input and unknown suffixes; reject an unknown prefix that cannot safely be copied |
+
+Timestamp fallback enables the advertised EXT dependency through an owned copy of
+the device extension list. Its state is attached to the created device and removed
+on destruction. HAL selection alone does not enable an unrelated physical-device
+workaround. Xclipse-specific selectors retain the tested family boundary because
+a narrower supported driver-version range has not been established.
+
+PowerVR and Mali retain their existing BC policy. Xclipse disables BC emulation
+in the outer/session path and enables its DXVK profile only for managed games.
+Its 128-byte push-constant limit still selects DXVK 2.6.2. The patched 2.6.2 payload
+checks the 14 BC formats required by Direct3D, including sampled-image, linear
+filtering and transfer support, before accepting D3D8/9/10/11 device creation.
+It requests the complete Vulkan BC feature only when the driver reports it.
+The layer's partial decoder therefore does not need to claim full Vulkan BC support.
 
 BCn decoding and several SPIR-V transformations already exist in the pinned layer.
 Descriptor and dynamic-state compatibility is partial: filtering an unsupported
-path is not equivalent to implementing its emulation. The native migration and
-component tests do not establish support for every driver version or fix Mali's
-first frame by themselves. Full APK CI and installed-device regressions remain
-separate validation gates.
+path is not equivalent to implementing its emulation. Mali's wireframe,
+cull-distance, multiple-viewport and exact-driver guards remain in force. Component
+tests establish the dispatch and packaging contracts; full APK CI and installed
+device regressions remain separate validation gates.
 
 The component build is available through the existing APK workflow. Replace
 `<reviewed-branch-or-tag>` with the reviewed branch or tag containing the component
@@ -94,6 +127,146 @@ archive, verify its download, and update the `hybris` entry in
 `tools/powervr/release.json`. APK assembly rejects a recipe or patch stack that no
 longer matches its pinned component. Preserve the separation between the Xclipse
 outer/session BC policy and the managed-game override when changing launch code.
+
+The paired Xclipse producer uses the same workflow with `-f component=dxvk-xclipse`.
+It emits `dxvk-2.6.2.tar.gz`, its checksum, and `dxvk-xclipse-component.json`.
+The pinned [component `202d551c`](https://github.com/wallentx/DroidDeck/releases/tag/dxvk-xclipse-202d551c6eef2158d6f448d98f495807e5a4db44)
+passed [component CI](https://github.com/wallentx/DroidDeck/actions/runs/38480706798)
+and archive, PE import/export, source and provenance verification.
+The candidate pin inventories all ten i386/x86-64 DLLs and records source, compiler,
+container, recipe and resolved build-tool provenance. Publish and verify that exact
+archive before replacing its entry in `release.json`; retain the other DXVK
+payload pins. A layer change that removes a previously advertised emulated feature
+must ship together with any consumer change needed to use its actual capabilities.
+
+## Comparing native, bare, and compatibility capabilities
+
+`tools/vulkan/capability_report.py` compares saved captures without accessing a
+device or changing its configuration. It accepts Android `vkjson` and Vulkan
+Profiles JSON from `vulkaninfo --json`. Its checked-in, typed Vulkan Registry data
+normalizes format IDs, flag masks, enum names and promoted feature/property
+structures. The comparison runs offline and has no third-party Python dependencies.
+
+Collect all three views on the same device and driver before interpreting a delta:
+
+1. Save the native Android view with `adb shell cmd gpu vkjson > native.json`.
+   Record the Android build fingerprint and the collector/version used.
+2. In the selected DroidDeck Linux guest, use the commands below to list GPUs and
+   capture its libhybris ICD with all layers disabled. Select the matching GPU
+   number explicitly; save the generated Profiles file as `bare.json`.
+3. Capture the same ICD in a fresh process with the managed-game compatibility/WSI
+   layer list and `HYBRIS_BC_TEXTURES=dxvk`, saving `compat.json`.
+   A session/compositor capture is a different policy and needs its own report.
+4. Retain each command, environment, exit status, stderr and loader trace alongside
+   the JSON. Record the APK commit, runtime archive/hash, HAL path, GPU identity,
+   driver version, layers and DXVK component. Confirm the loader trace matches the
+   intended mode; filenames alone do not establish which stack ran.
+5. Copy the guest JSON files to the checkout alongside `native.json`, then compare
+   them with the report command below.
+
+Run this inside the guest after the selected profile's environment has been
+applied. Preserve its `HYBRIS_*` loader and HAL settings. These commands require a
+loader supporting [layer filtering](https://github.com/KhronosGroup/Vulkan-Loader/blob/main/docs/LoaderLayerInterface.md#layer-filtering);
+the trace must confirm that the requested layer isolation took effect.
+
+```sh
+set -eu
+probe_runtime=${DROIDDECK_SYSTEM_VULKAN_RUNTIME:?selected system runtime required}
+export VK_DRIVER_FILES="$probe_runtime/icd.json" VK_ICD_FILENAMES="$probe_runtime/icd.json"
+export VK_LAYER_PATH="$probe_runtime/wsi:$probe_runtime/lib"
+export VK_LOADER_DEBUG=layer VK_LOADER_LAYERS_DISABLE='*'
+unset VK_LOADER_LAYERS_ENABLE VK_LOADER_LAYERS_ALLOW VK_INSTANCE_LAYERS
+vulkaninfo --summary
+```
+
+Set `probe_gpu` to the matching GPU number printed above. Use a fresh capture
+directory so an older auto-named file cannot be mistaken for the new output:
+
+```sh
+probe_gpu=0 # Replace with the matching GPU number from --summary.
+probe_capture=$(mktemp -d "${TMPDIR:-.}/vulkan-capture.XXXXXX")
+mkdir "$probe_capture/bare" "$probe_capture/compat"
+(
+  cd "$probe_capture/bare"
+  HYBRIS_BC_TEXTURES=0 vulkaninfo --json="$probe_gpu" >stdout.txt 2>loader.txt
+  set -- VP_VULKANINFO_*.json
+  test "$#" -eq 1
+  test -f "$1"
+  mv "$1" ../bare.json
+)
+(
+  cd "$probe_capture/compat"
+  unset DISABLE_WSI_LAYER
+  export VK_INSTANCE_LAYERS=VK_LAYER_window_system_integration:VK_LAYER_HYBRIS_compat
+  export HYBRIS_BC_TEXTURES=dxvk
+  if [ "${DROIDDECK_SYSTEM_VULKAN_PRESENTATION:-native}" = x11-shm ]; then
+    export WSI_X11_FORCE_SHM=1
+  fi
+  vulkaninfo --json="$probe_gpu" >stdout.txt 2>loader.txt
+  set -- VP_VULKANINFO_*.json
+  test "$#" -eq 1
+  test -f "$1"
+  mv "$1" ../compat.json
+)
+printf 'Captures: %s\n' "$probe_capture"
+```
+
+`VK_INSTANCE_LAYERS` selectively enables the named layers despite the blanket
+disable filter. [Vulkaninfo JSON output](https://github.com/KhronosGroup/Vulkan-Tools/blob/main/vulkaninfo/vulkaninfo.md)
+otherwise defaults to GPU 0 and an auto-generated filename; the explicit selection
+and rename above avoid both ambiguities. Run the following from the checkout after
+copying out the captures:
+
+```sh
+python tools/vulkan/capability_report.py \
+  --native native.json --bare bare.json --compat compat.json \
+  --output capability-report.json
+```
+
+The report contains native-to-bare, bare-to-compatibility, and native-to-compatibility
+comparisons. API version is a capability; vendor/device/name/driver values establish
+device identity. A multi-device capture is rejected rather than silently selecting
+one. Choose and save one device explicitly before comparison.
+
+| Result | Interpretation |
+| --- | --- |
+| `differences_ok` | Device identities match and every observed change matches an exact policy entry; unused policy entries fail |
+| `coverage_complete` | Both producers cover the compared fields, with no unsupported schema or conflicting source values |
+| `ok` | Both checks above pass |
+| Exit `0` / `1` / `2` | Complete expected comparison / differences or incomplete evidence / invalid input |
+
+Missing collector fields are reported as unknown coverage, not invented capability
+gains or losses. Conflicting duplicate core/extension values retain their source
+paths and values and fail coverage closed; they do not establish a driver defect.
+Queue, memory and collector metadata are retained as capture information rather
+than presented as compared capabilities. Unknown schema also prevents a complete
+result. The native Android and guest collectors need not query identical structures,
+so an incomplete result can still contain useful, unambiguous comparisons.
+
+Use `--policy expected.json` only after investigating a difference. Each entry in
+its `expected_differences` array requires `mode`, exact capability `path`,
+`transition` (`lost`, `gained` or `changed`), exact `before` and `after` values,
+`owner` (`native`, `compat` or `unavailable`), and a nonempty evidence-based `reason`.
+Absent values use JSON `null`. Wildcards, duplicate entries, stale entries and
+unbounded value changes are rejected. Direction alone does not establish ownership;
+an unclassified difference remains `unavailable`. Policies cannot override missing
+coverage or inconsistent input. Do not add exceptions merely to make a report pass.
+
+The generator `tools/vulkan/generate_registry_data.py` verifies the pinned `vk.xml`
+checksum before regenerating `registry_data.json`; the source URL, revision and
+license accompany the data. Focused normalization and policy tests run with:
+
+```sh
+python -m unittest discover -s tools/tests -p test_vulkan_capability_report.py
+```
+
+The tests include representative fixtures and [sanitized full captures from a
+Pixel 8 Pro](../../tools/tests/fixtures/vulkan-capabilities/README.md). The corpus
+preserves unsupported-format placeholders, promoted aliases and conflicting
+collector values, with source hashes and redactions documented. These historical
+captures predate this new component. Equivalent fresh captures and rendering
+regressions on PowerVR, Xclipse, Mali and an unchanged Adreno path remain hardware
+validation work; successful normalization or component CI is not that validation.
 
 ## Pixel 8 Pro / Tensor G3 evidence
 

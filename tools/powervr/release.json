@@ -233,84 +233,106 @@
           "mode": 493,
           "name": "dxvk-2.6.2/x32/d3d10core.dll",
           "path": "dxvk-2.6.2/x32/d3d10core.dll",
-          "sha256": "b34b479fa0bce29eba6dcff5b1f8584c2ae699d53a123668590f8a2b84e84094",
-          "size": 176142
+          "sha256": "901db7e7145261eaea3c34fcc8665a5bd97c7fa9a9c310c8efe29b62fd293822",
+          "size": 303104
         },
         {
           "mode": 493,
           "name": "dxvk-2.6.2/x32/d3d11.dll",
           "path": "dxvk-2.6.2/x32/d3d11.dll",
-          "sha256": "858d1a848dd5023191cb16cd986e0f00008faf5df8a87b5c835b56cf4b646910",
-          "size": 4845582
+          "sha256": "60574a0fabf6b6a6859614968522cddac7572fea294ee51f8b8a72eb5fad7c61",
+          "size": 3854336
         },
         {
           "mode": 493,
           "name": "dxvk-2.6.2/x32/d3d8.dll",
           "path": "dxvk-2.6.2/x32/d3d8.dll",
-          "sha256": "617459c8d1239f98687f8157bdaec85738ee4699885ed7d1ff13deb32609c759",
-          "size": 1658894
+          "sha256": "95150ba34431582dd1cec5a66bf80334f71d97a3da721f4f7f1dcfb1b4598d15",
+          "size": 1286144
         },
         {
           "mode": 493,
           "name": "dxvk-2.6.2/x32/d3d9.dll",
           "path": "dxvk-2.6.2/x32/d3d9.dll",
-          "sha256": "00bc142e98ddad1e334a4d88fa630038e092b0758b3d79e295172b181a4c772d",
-          "size": 4460558
+          "sha256": "ac4c0fa51a8ec2678805bb4eb6f88e0b54ed87bd7daa612295584f509a365550",
+          "size": 3641344
         },
         {
           "mode": 493,
           "name": "dxvk-2.6.2/x32/dxgi.dll",
           "path": "dxvk-2.6.2/x32/dxgi.dll",
-          "sha256": "67d7ca4a4f8f66baabd381c73b52a8e85870083e868ed474a4bc58b7da486883",
-          "size": 3137550
+          "sha256": "96c35bc545d847432184c2f2fe8dfe4e3dd9a067a4b4683f2defaa9f91ded38d",
+          "size": 2547712
         },
         {
           "mode": 493,
           "name": "dxvk-2.6.2/x64/d3d10core.dll",
           "path": "dxvk-2.6.2/x64/d3d10core.dll",
-          "sha256": "565154a0763c6460843fe47e5aaec62e609163d9995a922d5e19e85027fe2f88",
-          "size": 155662
+          "sha256": "ce63bf6d2536cd825268328188928a7b6194e43619da93c4ea62331a71808858",
+          "size": 274432
         },
         {
           "mode": 493,
           "name": "dxvk-2.6.2/x64/d3d11.dll",
           "path": "dxvk-2.6.2/x64/d3d11.dll",
-          "sha256": "5b63515a432d19302f7dc81dd2ee5bf40043683b5064a2bce03a2b6d27dcce5d",
-          "size": 4399118
+          "sha256": "59b940d4511f1fd943fc01c1bc2bd8c7d7f4da8b3a57fd4b6af5fa0c16e1499c",
+          "size": 3731456
         },
         {
           "mode": 493,
           "name": "dxvk-2.6.2/x64/d3d8.dll",
           "path": "dxvk-2.6.2/x64/d3d8.dll",
-          "sha256": "dfd837c3467eeb15f69a773e18bbc0550cb69c9e33d5d57b4ea42c5f63bfdc4b",
-          "size": 1544206
+          "sha256": "48ae37efa1b4041bdc1e7ad95e4f213066005b4bf2cf67ede204f65986762615",
+          "size": 1245184
         },
         {
           "mode": 493,
           "name": "dxvk-2.6.2/x64/d3d9.dll",
           "path": "dxvk-2.6.2/x64/d3d9.dll",
-          "sha256": "01e7ae2b0544b6031fe695fd16fbc76786ded57fdbe3f6bd11eee7c98d2c370d",
-          "size": 4108302
+          "sha256": "76dbbcaaa6ec50474a98a85f386f8f716ed278329ecea15d02428c941d5ad32a",
+          "size": 3526656
         },
         {
           "mode": 493,
           "name": "dxvk-2.6.2/x64/dxgi.dll",
           "path": "dxvk-2.6.2/x64/dxgi.dll",
-          "sha256": "074616e1af172edf175f3fc6ed7ca30f6c685a70875eed3af10797a10840ed39",
-          "size": 2891790
+          "sha256": "326f68a92534f879fe09594782fdd4c2b69f62e372231ee9ab37dec189b566f0",
+          "size": 2449408
         }
       ],
       "format": "tar.gz",
       "id": "dxvk-xclipse",
-      "ignored": [],
+      "ignored": [
+        "dxvk-2.6.2/LICENSE",
+        "dxvk-2.6.2/patches/0001-check-direct3d-bc-formats.patch",
+        "dxvk-2.6.2/provenance/SHA256SUMS",
+        "dxvk-2.6.2/provenance/build-manifest.json",
+        "dxvk-2.6.2/provenance/build-recipe.json",
+        "dxvk-2.6.2/provenance/compiler.txt",
+        "dxvk-2.6.2/provenance/downstream.patch",
+        "dxvk-2.6.2/provenance/pe-inventory.json",
+        "dxvk-2.6.2/provenance/sourcearchive.tar.zst",
+        "dxvk-2.6.2/provenance/submodules.txt",
+        "dxvk-2.6.2/provenance/tool-versions.txt",
+        "dxvk-2.6.2/source-commit"
+      ],
       "provenance": {
-        "note": "Unmodified upstream release, selected on Samsung Xclipse: its 128 bytes of push constants predate DXVK 3's 256-byte requirement. Covered by the zlib license already shipped as licenses/dxvk-LICENSE.",
-        "upstream_release": "https://github.com/doitsujin/dxvk/releases/tag/v2.6.2"
+        "component_ci_run": "https://github.com/wallentx/DroidDeck/actions/runs/38480706798",
+        "note": "Source-built DXVK with exact Direct3D BC format validation; provenance members are excluded from APK assembly.",
+        "producer_commit": "202d551c6eef2158d6f448d98f495807e5a4db44",
+        "upstream_release": "https://github.com/doitsujin/dxvk/releases/tag/v2.6.2",
+        "upstream_source_commit": "9d6f54a1ade20d1d27dd421024717a636f3d8c68"
       },
-      "recipe_inputs": {},
-      "sha256": "17761876556afd55736cb895d184f5a1c55d43350f1b1e3b129f8d28706d7992",
-      "size": 10107492,
-      "url": "https://github.com/doitsujin/dxvk/releases/download/v2.6.2/dxvk-2.6.2.tar.gz"
+      "recipe_inputs": {
+        "tools/dxvk/build_xclipse.sh": "cd95de49a087e69cef86906cb5e6258ae3c433f05d1fd565070bd33824e06ed1",
+        "tools/dxvk/xclipse-patches/0001-check-direct3d-bc-formats.patch": "d5721e702e1b71bd2504626cd644cb47a80f4ebd10b9a69caa195699f61d1fd0",
+        "tools/dxvk/xclipse-source.env": "794cff6fd19a4c70f6a138e703e612236d7d32a6d478d650a34bf7d636517212",
+        "tools/dxvk/xclipse_component_record.py": "43a71649471838c699db9abd466c36baf47d933e6d3ef72b34d1887d25686eac",
+        "tools/tests/dxvk_xclipse_toolchain_test.cpp": "944cc6a49c4581ff540e3583c8aa1469ecd406b579d2ec24ed2b67b4ce2ebcb3"
+      },
+      "sha256": "345da07352193d23a076e159adf6baeaaa94eaf7337c9ee6d0e90db580159822",
+      "size": 12764752,
+      "url": "https://github.com/wallentx/DroidDeck/releases/download/dxvk-xclipse-202d551c6eef2158d6f448d98f495807e5a4db44/dxvk-2.6.2.tar.gz"
     },
     {
       "files": [
@@ -681,22 +703,22 @@
   "format": 1,
   "hybris": {
     "provenance": {
-      "component_ci_run": "https://github.com/wallentx/DroidDeck/actions/runs/38223214145",
-      "note": "Built by the linked component CI; published archive checksum, source/compiler provenance, recipe inputs and library inventory verified before pinning.",
-      "producer_commit": "78831b134c818e9d1077a8b73a11364c3d47d36d",
+      "component_ci_run": "https://github.com/wallentx/DroidDeck/actions/runs/38475082027",
+      "note": "Candidate pin: publish this exact archive and verify its URL before updating release.json.",
+      "producer_commit": "fdaed47732a466add2dfc8b530d1bd9d9c916941",
       "upstream_source_commit": "bc8cb3586b79d208fd21b925fa0209b3e432e008"
     },
     "recipe_inputs": {
       "tools/hybris/build_runtime.sh": "fa9e599468bde4f5fcea12a9a6eabb910e32fdec12ac397eaef21c7f4152b709",
       "tools/hybris/component_record.py": "ec3cb033f07291e42c5890e04764357a6ff2900533bf78f72f1d7434a8e15daf",
       "tools/hybris/patches/0001-dxvk-bc-profile.patch": "b90605e51256595de4453352865aa198e59bd2d392ac6b7c2a60f38c57727c9d",
-      "tools/hybris/patches/0002-vendor-compatibility.patch": "cea3d43922b0789ed3223e3485eb240274b10de652e60d0a5efee8144704d909",
+      "tools/hybris/patches/0002-vendor-compatibility.patch": "dd292745649adb7105ddb6e0e7b2559a430f443f90b06ba7249351beb089b0af",
       "tools/hybris/powervr-hal-version.patch": "d3ed8ca03e5a874b9dc46651983117760c7490b96127335625d0480a2b85e66f",
       "tools/hybris/source.env": "9ae7985f2052dbcc8b9666494bc8a711ec85013f6a27d6d72d9729c32b919dd8"
     },
-    "sha256": "32e2c492ca6efc05365af02157bda8b4c30ff375335dca3b10bf2ba2a2bba92f",
-    "size": 5579537,
-    "tree_sha256": "64b631bdf2f4c1c833677e3e8b1f90bdd0a036e4240079d098f1952d3cc6ae81",
-    "url": "https://github.com/wallentx/DroidDeck/releases/download/hybris-78831b134c818e9d1077a8b73a11364c3d47d36d/runtime.tzst"
+    "sha256": "17201e215a4da3b88c2f284fc5b133f92336859a99682c8b1831decfa95f6b39",
+    "size": 5589594,
+    "tree_sha256": "15130b6d6e8d30204b3ebe07e58692a67d90da76078be717bb58d6852fd7839f",
+    "url": "https://github.com/wallentx/DroidDeck/releases/download/hybris-fdaed47732a466add2dfc8b530d1bd9d9c916941/runtime.tzst"
   }
 }
