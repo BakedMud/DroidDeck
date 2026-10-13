@@ -1,9 +1,11 @@
 #!/usr/bin/python3
 """Select a staged DXVK payload for one DroidDeck Proton game launch.
 
-Place this script beside a DXVK payload, then select its absolute path with
-DROIDDECK_PROTON_WRAPPER in the game's environment settings. Payloads can use
-x32/x64 or Proton's i386-windows/x86_64-windows/aarch64-windows directories.
+Place this script in the system Vulkan runtime directory beside a DXVK payload.
+The game launcher selects it using DROIDDECK_SYSTEM_VULKAN_RUNTIME and
+DROIDDECK_SYSTEM_VULKAN_DXVK=managed; DROIDDECK_HYBRIS_DXVK selects the payload
+subdirectory (default: dxvk). Payloads can use x32/x64 or Proton's
+i386-windows/x86_64-windows/aarch64-windows directories.
 Run `python3 run-proton.py --check /path/to/proton` to check the payload and
 Proton source layout without starting Proton or changing a game prefix.
 
