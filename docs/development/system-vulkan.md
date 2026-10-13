@@ -113,14 +113,29 @@ build; the PowerVR BC patch does not implement the other missing features.
 Consequently, Mali must not be locked to the PowerVR DXVK payload. Compatible
 DXVK builds/layers or game-specific choices still need separate validation.
 
-The subsequent installed-APK attempt on Pixel 8 Pro hangs at "waiting for the
-first frame". Aligning the Mali profile with the merged PowerVR/Xclipse code does
-not establish the cause or fix that hang; device troubleshooting remains pending.
+Historical installed-APK evidence goes beyond the Termux probe. The
+[full APK build at `b35888b`](https://github.com/wallentx/DroidDeck/actions/runs/38304474692)
+passed CI. On the Pixel 8 Pro, the installed 0.3.2 APK's native ARM64 Steam client
+reached `READY` using shared-memory presentation, and Old School Rally downloaded
+successfully. Game rendering remains unverified on that Mali build.
 
-These are native capability results under Termux's UID, not a successful
-libhybris, Steam or game launch under DroidDeck's UID. Focused JVM tests use
-stubbed Android dependencies; guest tests validate environment and command
-selection. Full Android/Compose CI and an installed APK launch remain required.
+The stock `DXVK 3.1.1-27-g25ca` payload still cannot create an adapter because
+Mali lacks required `fillModeNonSolid` support, alongside the other capability
+gates above. The tested Old School Rally build produced white or black output
+with the WineD3D fallbacks and rejected `-force-vulkan` because Vulkan support was
+not built into the game. Managed DXVK and WineD3D choices remain user-controlled.
+
+The newer shared experimental Mali DXVK source at
+[`48fdc1a`](https://github.com/wallentx/DroidDeck/commit/48fdc1a) contains the
+three-architecture native wrapper and a separate
+[component build](https://github.com/wallentx/DroidDeck/actions/runs/38361775286).
+The new component has not received installed-device validation. The successful
+[PowerVR/Xclipse APK build](https://github.com/wallentx/DroidDeck/actions/runs/38357695607?pr=7)
+covers base revision `500451b`; it does not validate the newer Mali component.
+
+Focused JVM tests use stubbed Android dependencies; guest tests validate
+environment and command selection. Full Android/Compose CI and installed-device
+validation of the exact component artifact remain required.
 
 ## Related implementation discussion
 
@@ -130,4 +145,5 @@ were reviewed while preparing this extension. Particularly relevant:
 - [Mali libhybris rendering report](https://github.com/Droid-Deck/DroidDeck/issues/165#issuecomment-6014766410).
 - [Android handle transport, SDL and PowerVR DRM rationale](https://github.com/Droid-Deck/DroidDeck/issues/165#issuecomment-6102946636).
 - [Mali shader, feature and DXVK compatibility gaps](https://github.com/Droid-Deck/DroidDeck/issues/165#issuecomment-6108722387).
+- [Mali device findings and follow-up](https://github.com/Droid-Deck/DroidDeck/issues/165#issuecomment-6123415216), which reinforce the need to validate exact DXVK and wrapper artifacts on device.
 - [Xclipse port findings](https://github.com/Droid-Deck/DroidDeck/issues/165#issuecomment-6114421494), which informed capability checks but are not enabled as Mali workarounds.
