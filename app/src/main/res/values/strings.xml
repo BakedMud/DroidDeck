@@ -2376,6 +2376,8 @@
     <string name="gog_achievements_enable_store">Enable GOG achievements in Stores settings</string>
     <string name="gog_achievements_unavailable">Achievements unavailable; check session logs</string>
     <string name="achievement_unlocked">Achievement unlocked</string>
+    <string name="gpu_mali_dxvk_experimental">Experimental Mali DXVK</string>
+    <string name="gpu_mali_dxvk_hint">Try the bundled compatibility build for Windows games. Tested on Pixel 8 Pro; other drivers and some games remain unsupported. Applies to the next session.</string>
     <string name="touch_paste">Paste</string>
     <string name="touch_dpad">D-pad</string>
     <string name="touch_left_stick">Left stick</string>

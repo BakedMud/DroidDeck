@@ -1204,6 +1204,7 @@ class MainActivity : ComponentActivity() {
             gpu = drivers.state(),
             gpuActions = com.droiddeck.launcher.ui.GpuDriversActions(
                 onAuto = { on -> drivers.setMode(on) },
+                onExperimentalMaliDxvk = { on -> drivers.setExperimentalMaliDxvk(on) },
                 onPair = { key -> drivers.selectPair(key) },
                 onRefresh = { if (drivers.mode == SessionPrefs.GPU_DRIVERS_AUTO) drivers.ensureAuto(force = true) else drivers.checkLatestTurnip() },
                 // Picking one driver on its own is Manual: Auto would put its pair back.

@@ -101,6 +101,24 @@ class SystemVulkanSelectionTest {
         }
     }
 
+    @Test fun experimentalMaliSelectsManagedPayloadWithoutChangingPresentation() {
+        val env = mutableListOf<String>()
+        SystemVulkanDriver.addEnvironment(File("/runtime"), "/vendor/lib64/hw/vulkan.mali.so", null, 37, env, true)
+        assertTrue(env.contains("DROIDDECK_HYBRIS_DXVK=dxvk-mali"))
+        assertTrue(env.contains("DXVK_MALI_COMPAT=1"))
+        assertTrue(env.contains("DROIDDECK_SYSTEM_VULKAN_DXVK=managed"))
+        assertTrue(env.contains("DROIDDECK_SYSTEM_VULKAN_PRESENTATION=x11-shm"))
+        assertFalse(env.any { it.startsWith("BL_POWERVR_DRM_HANDLES=") })
+        assertFalse(env.any { it.startsWith("DROIDDECK_POWERVR_RUNTIME=") })
+    }
+
+    @Test fun experimentalMaliPreferenceDoesNotChangeOtherProfiles() {
+        val env = mutableListOf<String>()
+        SystemVulkanDriver.addEnvironment(File("/runtime"), "/vendor/lib64/hw/vulkan.samsung.so", "/dev/dri/renderD128", 37, env, true)
+        assertTrue(env.contains("DROIDDECK_HYBRIS_DXVK=dxvk-2.6.2"))
+        assertFalse(env.any { it.startsWith("DXVK_MALI_COMPAT=") })
+    }
+
     @Test fun unknownHalCannotActivateTheSystemProfile() {
         assertThrows(IllegalStateException::class.java) {
             SystemVulkanDriver.addEnvironment(File("/runtime"), "/vendor/lib64/hw/vulkan.other.so", null, 37, mutableListOf())

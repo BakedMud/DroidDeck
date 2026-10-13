@@ -53,6 +53,7 @@ import androidx.compose.runtime.rememberUpdatedState
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
+import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.focus.FocusRequester
@@ -500,14 +501,27 @@ fun ComponentsPage(
         when (l) {
             GPU_TAB -> {
                 val active = gpu.activePair
-                InUseBar(
-                    queued = gpu.busy != null,
-                    sentence = (active?.let { "${it.name} ${it.version}" } ?: gpu.activeBundle ?: if (gpu.systemVulkan) stringResource(R.string.gpu_system_driver, gpu.systemDriverName) else stringResource(R.string.gpu_builtin))
-                        .let { if (gpu.auto) stringResource(R.string.gpu_bar_auto, it) else it },
-                    note = if (gpu.busy != null) (if (gpu.percent >= 0) "${gpu.percent}%" else "…")
-                        else if (gpu.systemVulkan) stringResource(R.string.gpu_auto_system_hint)
-                        else gpu.autoStatus.ifEmpty { if (active != null || gpu.activeBundle != null) "" else gpu.pairs.firstOrNull { it.recommended }?.let { stringResource(R.string.gpu_recommended_for, it.name) } ?: stringResource(R.string.gpu_refresh_hint) },
-                )
+                Column {
+                    InUseBar(
+                        queued = gpu.busy != null,
+                        sentence = (active?.let { "${it.name} ${it.version}" } ?: gpu.activeBundle ?: if (gpu.systemVulkan) stringResource(R.string.gpu_system_driver, gpu.systemDriverName) else stringResource(R.string.gpu_builtin))
+                            .let { if (gpu.auto) stringResource(R.string.gpu_bar_auto, it) else it },
+                        note = if (gpu.busy != null) (if (gpu.percent >= 0) "${gpu.percent}%" else "…")
+                            else if (gpu.systemVulkan) stringResource(R.string.gpu_auto_system_hint)
+                            else gpu.autoStatus.ifEmpty { if (active != null || gpu.activeBundle != null) "" else gpu.pairs.firstOrNull { it.recommended }?.let { stringResource(R.string.gpu_recommended_for, it.name) } ?: stringResource(R.string.gpu_refresh_hint) },
+                    )
+                    if (gpu.experimentalMaliAvailable && gpu.systemVulkan) {
+                        Row(Modifier.fillMaxWidth().padding(top = 12.dp), verticalAlignment = Alignment.CenterVertically) {
+                            Column(Modifier.weight(1f)) {
+                                Text(stringResource(R.string.gpu_mali_dxvk_experimental), fontSize = 14.sp, color = colors.onSurface)
+                                Text(stringResource(R.string.gpu_mali_dxvk_hint), fontSize = 12.sp, color = colors.onSurfaceVariant)
+                            }
+                            ToggleSwitch(gpu.experimentalMaliDxvk, enabled = !com.droiddeck.launcher.session.SessionState.running,
+                                label = stringResource(R.string.gpu_mali_dxvk_experimental),
+                                modifier = Modifier.testTag("setting-experimental-mali-dxvk"), onChange = gpuActions.onExperimentalMaliDxvk)
+                        }
+                    }
+                }
             }
             PROTON_TAB -> InUseBar(
                 queued = false,

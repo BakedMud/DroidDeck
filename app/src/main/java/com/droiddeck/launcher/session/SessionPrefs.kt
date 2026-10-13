@@ -47,6 +47,13 @@ object SessionPrefs {
 
     private fun prefs(context: Context) = context.getSharedPreferences("session", Context.MODE_PRIVATE)
 
+    /** Disabled until explicitly selected; the DXVK payload also verifies the Vulkan driver. */
+    fun experimentalMaliDxvk(context: Context): Boolean = prefs(context).getBoolean("experimentalMaliDxvk", false)
+
+    fun setExperimentalMaliDxvk(context: Context, enabled: Boolean) {
+        prefs(context).edit().putBoolean("experimentalMaliDxvk", enabled).apply()
+    }
+
     val orientationOptions = listOf(
         ActivityInfo.SCREEN_ORIENTATION_SENSOR_LANDSCAPE to R.string.setup_orientation_auto,
         ActivityInfo.SCREEN_ORIENTATION_LANDSCAPE to R.string.setup_orientation_landscape,

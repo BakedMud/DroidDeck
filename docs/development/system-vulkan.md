@@ -145,14 +145,18 @@ This is a bounded test;
 it does not establish a full race, long-run stability, broad compatibility,
 robustness2 conformance, or coverage of every rejection guard.
 
-`dxvk-mali` is a manual `workflow_dispatch` component artifact. It is not bundled,
-pinned, or automatically selected by the normal APK. The Mali profile keeps
-`dxvkPayload=null`, `DXVK=user`, and `x11-shm`; external staging merges the
-experimental `run-proton.py` and `dxvk-mali` alongside the current runtime `lib/`
-and `wsi/`, then requires explicit managed selection with `DXVK_MALI_COMPAT=1`.
-Focused JVM tests still use stubbed Android dependencies, while guest tests cover
-environment and command selection. Device validation used the separately staged
-component with the historical APK specified above.
+The APK now bundles the verified `15dc` experimental component through the
+checksum-pinned PowerVR assembler. On Mali, open **Components > GPU drivers** and
+enable **Experimental Mali DXVK** before starting a session. It is off by default;
+the normal Mali profile keeps its DXVK choices editable until enabled. The switch
+selects `dxvk-mali` with `DXVK_MALI_COMPAT=1`, managed game DXVK and the existing
+X11 SHM presentation. It does not change other GPU profiles. The strict DXVK driver
+identity and unsupported-feature checks remain active, so other Mali drivers and
+some games can still be rejected. The setting cannot change during a session.
+
+The published component contains the same fifteen i386, x86_64 and ARM64X DLLs
+verified in the device test above, plus source, license, patches and producer
+provenance. Assembly and launch both reject plain ARM64 DLLs in this payload.
 
 ## Related implementation discussion
 

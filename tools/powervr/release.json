@@ -311,6 +311,371 @@
       "sha256": "17761876556afd55736cb895d184f5a1c55d43350f1b1e3b129f8d28706d7992",
       "size": 10107492,
       "url": "https://github.com/doitsujin/dxvk/releases/download/v2.6.2/dxvk-2.6.2.tar.gz"
+    },
+    {
+      "files": [
+        {
+          "mode": 420,
+          "name": "LICENSE",
+          "path": "licenses/dxvk-mali/LICENSE",
+          "sha256": "a5cb1a6ded7d2d7e92d550ba28edd21be2d1d4044662b399887351023e30ce64",
+          "size": 1074
+        },
+        {
+          "mode": 420,
+          "name": "SHA256SUMS",
+          "path": "provenance/dxvk-mali/SHA256SUMS",
+          "sha256": "069ce6d7f3be8dd169242a6de863c5bb2515b8699abccac1a812f74241d3f2f1",
+          "size": 4802
+        },
+        {
+          "mode": 420,
+          "name": "arm64x-recipe-commit",
+          "path": "provenance/dxvk-mali/arm64x-recipe-commit",
+          "sha256": "4fdddb3fe33d6a3b0f2d0373037b43a7d670157e814692342e2b5467961ca6b9",
+          "size": 41
+        },
+        {
+          "mode": 420,
+          "name": "build-version",
+          "path": "provenance/dxvk-mali/build-version",
+          "sha256": "9f6ab8a826e7661a48fabb76f14df46d414ee8ee64b98d2be22b4ce3e44f2f26",
+          "size": 50
+        },
+        {
+          "mode": 420,
+          "name": "compiler-targets.txt",
+          "path": "provenance/dxvk-mali/compiler-targets.txt",
+          "sha256": "cbea63f70bebfc22f00045ac2587427b7e738188f85d253f1fae4630525761d8",
+          "size": 243
+        },
+        {
+          "mode": 420,
+          "name": "compiler.txt",
+          "path": "provenance/dxvk-mali/compiler.txt",
+          "sha256": "66556e7a605a0b02f774befce4f26bd2369cff15e9586a10bb63fa808d262e21",
+          "size": 1391
+        },
+        {
+          "mode": 420,
+          "name": "container-image",
+          "path": "provenance/dxvk-mali/container-image",
+          "sha256": "cc4e4677309337c20961ac944deac05e182f7c9b5c91ef53f2153b1b4193d04c",
+          "size": 149
+        },
+        {
+          "mode": 420,
+          "name": "crossfiles/aarch64-windows.ini",
+          "path": "provenance/dxvk-mali/crossfiles/aarch64-windows.ini",
+          "sha256": "28eba412421f4446065bafaf7df92b8727b1ddf7daefb7c6a28ecb0a212da353",
+          "size": 935
+        },
+        {
+          "mode": 420,
+          "name": "crossfiles/i386-windows.ini",
+          "path": "provenance/dxvk-mali/crossfiles/i386-windows.ini",
+          "sha256": "c00961eefcdf8b70b6f1bc8bf93863440e5a92e8bddaf269bab4acbef2915d8f",
+          "size": 930
+        },
+        {
+          "mode": 420,
+          "name": "crossfiles/x86_64-windows.ini",
+          "path": "provenance/dxvk-mali/crossfiles/x86_64-windows.ini",
+          "sha256": "0c764129f0aa7315c4afcaa8f9deae5382300fdea03694e7da8c3a53e87713d5",
+          "size": 946
+        },
+        {
+          "mode": 420,
+          "name": "downstream.patch",
+          "path": "licenses/dxvk-mali/downstream.patch",
+          "sha256": "97356b75fe85e430b5e37d78f95740664305a3ceb550d11842e67cb52421f466",
+          "size": 18806
+        },
+        {
+          "mode": 493,
+          "name": "dxvk-mali/aarch64-windows/d3d10core.dll",
+          "path": "dxvk-mali/aarch64-windows/d3d10core.dll",
+          "sha256": "0627cfc4cbde5e134095fdde6c5410ba333724a67c517e648e3ef5d955dc5041",
+          "size": 503808
+        },
+        {
+          "mode": 420,
+          "name": "dxvk-mali/aarch64-windows/d3d10core.dll.a",
+          "path": "dxvk-mali/aarch64-windows/d3d10core.dll.a",
+          "sha256": "66fbf1c3d6b3c48d2b13c87e538b2735de0ac1e19ef88c8b372ed57df84551d3",
+          "size": 2804
+        },
+        {
+          "mode": 493,
+          "name": "dxvk-mali/aarch64-windows/d3d11.dll",
+          "path": "dxvk-mali/aarch64-windows/d3d11.dll",
+          "sha256": "78529586beffdfd456335d5bb816006617b1560318ea57d69bed3bce861557d8",
+          "size": 10592256
+        },
+        {
+          "mode": 420,
+          "name": "dxvk-mali/aarch64-windows/d3d11.dll.a",
+          "path": "dxvk-mali/aarch64-windows/d3d11.dll.a",
+          "sha256": "0e1c6859fadd91156d82b23717976ba2109baa00ab36b61aeceb014f1c4ff59b",
+          "size": 3264
+        },
+        {
+          "mode": 493,
+          "name": "dxvk-mali/aarch64-windows/d3d8.dll",
+          "path": "dxvk-mali/aarch64-windows/d3d8.dll",
+          "sha256": "934b4d80c674c45663ffc49f25de46695eb0e239bf40127e567f8b0148e5514c",
+          "size": 2437120
+        },
+        {
+          "mode": 420,
+          "name": "dxvk-mali/aarch64-windows/d3d8.dll.a",
+          "path": "dxvk-mali/aarch64-windows/d3d8.dll.a",
+          "sha256": "eadef354b72815d627f79389c8888e62511a43eb08e09fc532c7aa623eb54888",
+          "size": 3002
+        },
+        {
+          "mode": 493,
+          "name": "dxvk-mali/aarch64-windows/d3d9.dll",
+          "path": "dxvk-mali/aarch64-windows/d3d9.dll",
+          "sha256": "cdbf296a1ef331bdaa861c1f5c8bceddfab0fd4fe61a5e2142311ac6b86b2f5c",
+          "size": 10084352
+        },
+        {
+          "mode": 420,
+          "name": "dxvk-mali/aarch64-windows/d3d9.dll.a",
+          "path": "dxvk-mali/aarch64-windows/d3d9.dll.a",
+          "sha256": "af5044b9a014fa4c03c2c42c96cce3054064fe714e3f59e45d8a4c66a0f02b4a",
+          "size": 9990
+        },
+        {
+          "mode": 493,
+          "name": "dxvk-mali/aarch64-windows/dxgi.dll",
+          "path": "dxvk-mali/aarch64-windows/dxgi.dll",
+          "sha256": "7f6c1cb90b2574b483e00d52a4fe0945ecc8440a1663ab1560d92d3c77a86137",
+          "size": 7352320
+        },
+        {
+          "mode": 420,
+          "name": "dxvk-mali/aarch64-windows/dxgi.dll.a",
+          "path": "dxvk-mali/aarch64-windows/dxgi.dll.a",
+          "sha256": "55b3d2cf2591b4a74eedab3de8829afb8d0bb80c4a5f63c2a2fb4c5d5b462ff3",
+          "size": 3700
+        },
+        {
+          "mode": 493,
+          "name": "dxvk-mali/i386-windows/d3d10core.dll",
+          "path": "dxvk-mali/i386-windows/d3d10core.dll",
+          "sha256": "42e1c74a72b3e796b55339190ca52712d3be109c44644efab4e6033505caaeb6",
+          "size": 303104
+        },
+        {
+          "mode": 420,
+          "name": "dxvk-mali/i386-windows/d3d10core.dll.a",
+          "path": "dxvk-mali/i386-windows/d3d10core.dll.a",
+          "sha256": "7df3bf8a8325d7c65671c0a9c740690770c01db7de6a256cacdc0e0e6d900705",
+          "size": 1890
+        },
+        {
+          "mode": 493,
+          "name": "dxvk-mali/i386-windows/d3d11.dll",
+          "path": "dxvk-mali/i386-windows/d3d11.dll",
+          "sha256": "8e27f4633989eae2a929cfa8d21f49d006854dbd4ef6cf442857544b6d4ef349",
+          "size": 5640192
+        },
+        {
+          "mode": 420,
+          "name": "dxvk-mali/i386-windows/d3d11.dll.a",
+          "path": "dxvk-mali/i386-windows/d3d11.dll.a",
+          "sha256": "1a98a263c4324ae88fa13b2cbaf24ca4be43deeb487509bccb7abed63145a139",
+          "size": 2100
+        },
+        {
+          "mode": 493,
+          "name": "dxvk-mali/i386-windows/d3d8.dll",
+          "path": "dxvk-mali/i386-windows/d3d8.dll",
+          "sha256": "7976aefc3dcb2947d69f47692e67444656e24b462ff7e53af9db75d8760c9a84",
+          "size": 1327104
+        },
+        {
+          "mode": 420,
+          "name": "dxvk-mali/i386-windows/d3d8.dll.a",
+          "path": "dxvk-mali/i386-windows/d3d8.dll.a",
+          "sha256": "b741c19ba40259e69d22b4c3e8b7113e9921885cb768b249a70eab8cbfeeb898",
+          "size": 1976
+        },
+        {
+          "mode": 493,
+          "name": "dxvk-mali/i386-windows/d3d9.dll",
+          "path": "dxvk-mali/i386-windows/d3d9.dll",
+          "sha256": "08156bed894a52c22ecf9b301c12bfb5cb6b01f3ead2ccd2d7a699c362e2522b",
+          "size": 5468160
+        },
+        {
+          "mode": 420,
+          "name": "dxvk-mali/i386-windows/d3d9.dll.a",
+          "path": "dxvk-mali/i386-windows/d3d9.dll.a",
+          "sha256": "73ce970736527cf7ea5aa8d58c6474748e772016fd8116188b1e72656c7676a8",
+          "size": 5396
+        },
+        {
+          "mode": 493,
+          "name": "dxvk-mali/i386-windows/dxgi.dll",
+          "path": "dxvk-mali/i386-windows/dxgi.dll",
+          "sha256": "593fbd77cc63392cef240d4355f93bf298a0e22e4f42dedc076f39bbe1ffba2d",
+          "size": 4018176
+        },
+        {
+          "mode": 420,
+          "name": "dxvk-mali/i386-windows/dxgi.dll.a",
+          "path": "dxvk-mali/i386-windows/dxgi.dll.a",
+          "sha256": "4c0844193957169bc0a81c675ddc693fe2e92cb40e64ce62830a7d6890d872c2",
+          "size": 2310
+        },
+        {
+          "mode": 493,
+          "name": "dxvk-mali/x86_64-windows/d3d10core.dll",
+          "path": "dxvk-mali/x86_64-windows/d3d10core.dll",
+          "sha256": "1a8cea112b938b50477750325e8574f73cda72b571bcc13ed91172a6b3cbf907",
+          "size": 274432
+        },
+        {
+          "mode": 420,
+          "name": "dxvk-mali/x86_64-windows/d3d10core.dll.a",
+          "path": "dxvk-mali/x86_64-windows/d3d10core.dll.a",
+          "sha256": "9c2476f35249dcb0c72a3f06bdd8b04173581e430495ecd5e9701d74ec481387",
+          "size": 1880
+        },
+        {
+          "mode": 493,
+          "name": "dxvk-mali/x86_64-windows/d3d11.dll",
+          "path": "dxvk-mali/x86_64-windows/d3d11.dll",
+          "sha256": "e2d8ebe5d45ee7884a495c60f0be235a80e1fe21058beb29ab650e440088b293",
+          "size": 5488640
+        },
+        {
+          "mode": 420,
+          "name": "dxvk-mali/x86_64-windows/d3d11.dll.a",
+          "path": "dxvk-mali/x86_64-windows/d3d11.dll.a",
+          "sha256": "015e3c2013d6e00cc00a27dc5978afc6a1c5c62070405626732a77f7175f4fe4",
+          "size": 2084
+        },
+        {
+          "mode": 493,
+          "name": "dxvk-mali/x86_64-windows/d3d8.dll",
+          "path": "dxvk-mali/x86_64-windows/d3d8.dll",
+          "sha256": "ff7e2ae9193e5e2d09ea68055bad04b729e0d82724432ed5bf05b3bf090a39c6",
+          "size": 1261568
+        },
+        {
+          "mode": 420,
+          "name": "dxvk-mali/x86_64-windows/d3d8.dll.a",
+          "path": "dxvk-mali/x86_64-windows/d3d8.dll.a",
+          "sha256": "91d57cde7323d92eb66ac93845943eafd54f3e47dba59dfc4f9ec432c292a49f",
+          "size": 1964
+        },
+        {
+          "mode": 493,
+          "name": "dxvk-mali/x86_64-windows/d3d9.dll",
+          "path": "dxvk-mali/x86_64-windows/d3d9.dll",
+          "sha256": "5bfb8572aed80f62d53c92a3b9a2508a7f8e61e81202375e7844efe00c91009a",
+          "size": 5292032
+        },
+        {
+          "mode": 420,
+          "name": "dxvk-mali/x86_64-windows/d3d9.dll.a",
+          "path": "dxvk-mali/x86_64-windows/d3d9.dll.a",
+          "sha256": "5e56f87346c64c461c22c7c3e13420535abce52810ed2c63c922ffdc2f1825ce",
+          "size": 5314
+        },
+        {
+          "mode": 493,
+          "name": "dxvk-mali/x86_64-windows/dxgi.dll",
+          "path": "dxvk-mali/x86_64-windows/dxgi.dll",
+          "sha256": "04357b12b4e36c9bd66d5b93c936fcfd11126990853d5a839cfe8bde0b2969a8",
+          "size": 3891200
+        },
+        {
+          "mode": 420,
+          "name": "dxvk-mali/x86_64-windows/dxgi.dll.a",
+          "path": "dxvk-mali/x86_64-windows/dxgi.dll.a",
+          "sha256": "ec54710e3dc62a1405069df602d4117d7303aa160c14e1b09cd6fe5e2871f073",
+          "size": 2290
+        },
+        {
+          "mode": 420,
+          "name": "proton-recipe-commit",
+          "path": "provenance/dxvk-mali/proton-recipe-commit",
+          "sha256": "0fcb76ab984e5f6a5054d6a3084d29f2236022925d7bf8fdc98a7a04c93e3fed",
+          "size": 41
+        },
+        {
+          "mode": 420,
+          "name": "provenance/compiler-arm64x-probe.json",
+          "path": "provenance/dxvk-mali/provenance/compiler-arm64x-probe.json",
+          "sha256": "40d51b24c3e82ceb17248fe3f5312751f55ddd4ab16a2db96e28f8cc0fb10fde",
+          "size": 485
+        },
+        {
+          "mode": 420,
+          "name": "provenance/pe-arm64x.json",
+          "path": "provenance/dxvk-mali/provenance/pe-arm64x.json",
+          "sha256": "a08cb4586f66fca49e6f77136d0ed30180b2d42876a87a8e5b625e4893aecf45",
+          "size": 2619
+        },
+        {
+          "mode": 420,
+          "name": "provenance/pe-imports.json",
+          "path": "provenance/dxvk-mali/provenance/pe-imports.json",
+          "sha256": "783a36b10a34f673422e05b5e337f678cd8f8000645a19f1fd86dbadb025064a",
+          "size": 11183
+        },
+        {
+          "mode": 420,
+          "name": "source-commit",
+          "path": "provenance/dxvk-mali/source-commit",
+          "sha256": "cb748e54f2fcdca516189435647ea001dbd14f97e2df5b36fd2f13fc185a5dbf",
+          "size": 41
+        },
+        {
+          "mode": 420,
+          "name": "sourcearchive.tar.zst",
+          "path": "licenses/dxvk-mali/sourcearchive.tar.zst",
+          "sha256": "6941d3cb0692a2aca236f6d83066b740f93b70cab6825d54e852850f497647ea",
+          "size": 5976841
+        },
+        {
+          "mode": 420,
+          "name": "submodules.txt",
+          "path": "provenance/dxvk-mali/submodules.txt",
+          "sha256": "01e74c750ca473590e17f1ca33f204b8272f84898ee6e8a8509be9740919092c",
+          "size": 472
+        },
+        {
+          "mode": 420,
+          "name": "tool-versions.txt",
+          "path": "provenance/dxvk-mali/tool-versions.txt",
+          "sha256": "43318284274ea1ebfdd342d16d15d9796ac666329493bbdc4cadc2e25ad63871",
+          "size": 1165
+        }
+      ],
+      "format": "zip",
+      "ignored": [],
+      "provenance": {
+        "ci_run": "https://github.com/wallentx/DroidDeck/actions/runs/38376448398",
+        "note": "Verified experimental payload repackaged without DLL changes; source, patches, licenses and producer metadata preserved.",
+        "repository_commit": "15dc6cbbc891e8633738ca1a822cf96403741b79"
+      },
+      "recipe_inputs": {
+        "tools/dxvk/build_mali.sh": "1c1d06c51874039937efc1f68617ffb73beb7a57a76781954263204c9fdf46d2",
+        "tools/dxvk/mali-patches/0001-experimental-mali-capabilities-and-guards.patch": "61200ace1f66a150b0f8b299be57bb5d8eae95e0f52222f5924e69d9caf4ab0d",
+        "tools/dxvk/mali-source.env": "51f7d7aeaa2395aeada1b3de37a34c96e8035fd3f7004c6be6aa6bf77f537d45",
+        "tools/dxvk/patches/0001-check-direct3d-bc-formats.patch": "d38fc4d773b7974498dcb377dbaa883c9bba36aefa3235b39bca69d6dd220c77",
+        "tools/dxvk/patches/0002-present-semaphore-per-swapchain-image.patch": "c802789a33099d3efc3413a297e2b752f8eb84c18cbfbdfc04e188f4090410d0",
+        "tools/dxvk/source.env": "e49b0757f203f88783360c06118f60945242fde8738419e0b27cf2531bf3a365"
+      },
+      "sha256": "a6d020bd0f285f2e6c1f3e33dd93064a96ebdeea2cc526b3d5b4ad94d83c5875",
+      "size": 30405182,
+      "url": "https://github.com/wallentx/DroidDeck/releases/download/dxvk-mali-15dc6cb-20261013/dxvk-mali-15dc6cb.zip"
     }
   ],
   "format": 1,

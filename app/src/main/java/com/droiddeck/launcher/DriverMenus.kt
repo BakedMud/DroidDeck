@@ -60,6 +60,14 @@ internal class DriverMenus(private val activity: Activity, private val ui: Handl
     private val systemGpu: Boolean get() = gpu.family.systemProfile != null
     private val systemDriverName: String get() = gpu.family.systemProfile?.gpuName.orEmpty()
 
+    var experimentalMaliDxvk by mutableStateOf(false)
+
+    fun setExperimentalMaliDxvk(enabled: Boolean) {
+        if (!SystemVulkanDriver.isMali() || com.droiddeck.launcher.session.SessionState.running) return
+        SessionPrefs.setExperimentalMaliDxvk(activity, enabled)
+        experimentalMaliDxvk = enabled
+    }
+
     fun state() = GpuDriversState(
         gpuName = gpu.displayName(activity), gpuFamily = gpu.family.label(activity), soc = gpu.soc, supportText = gpu.supportText(activity),
         supported = gpu.support == GpuInfo.Support.TESTED, unsupported = gpu.support == GpuInfo.Support.UNSUPPORTED,
@@ -69,13 +77,15 @@ internal class DriverMenus(private val activity: Activity, private val ui: Handl
         linuxDownloads = linuxDownloads, androidDownloads = androidDownloads, canRestoreBundled = canRestoreBundled,
         activeBundle = activeBundle,
         systemVulkan = SystemVulkanDriver.usesDefault(linuxSelected),
-        runtimeManagedDxvk = SystemVulkanDriver.managesDxvk(linuxSelected),
+        runtimeManagedDxvk = SystemVulkanDriver.managesDxvk(activity, linuxSelected),
         systemGpu = systemGpu, systemDriverName = systemDriverName,
+        experimentalMaliAvailable = SystemVulkanDriver.isMali(), experimentalMaliDxvk = experimentalMaliDxvk,
     )
     var androidRows by mutableStateOf<List<DriverRow>>(emptyList())
     var androidSelected by mutableStateOf("")
 
     fun refreshDrivers() {
+        experimentalMaliDxvk = SessionPrefs.experimentalMaliDxvk(activity)
         val lm = LinuxVulkanDriverManager(activity)
         fun origin(id: String) = if (TurnipReleases.isDownloaded(activity, id)) DriverRow.DOWNLOADED else DriverRow.IMPORTED
         val bundles = DriverBundle.all(activity)

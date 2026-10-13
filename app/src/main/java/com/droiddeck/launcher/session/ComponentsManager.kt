@@ -703,7 +703,7 @@ object ComponentsManager {
     internal fun runtimeManaged(comp: String, runtimeManagedDxvk: Boolean): Boolean = comp == "dxvk" && runtimeManagedDxvk
 
     private fun runtimeManaged(context: Context, comp: String): Boolean =
-        runtimeManaged(comp, SystemVulkanDriver.managesDxvk(SessionPrefs.linuxDriver(context)))
+        runtimeManaged(comp, SystemVulkanDriver.managesDxvk(context, SessionPrefs.linuxDriver(context)))
 
     private fun requireSelectable(context: Context, comp: String, managed: (String) -> Boolean = { runtimeManaged(context, it) }) {
         check(!managed(comp)) { context.getString(R.string.cmgr_system_dxvk_managed, SystemVulkanDriver.gpuName()) }

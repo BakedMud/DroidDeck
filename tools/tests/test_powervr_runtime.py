@@ -164,6 +164,37 @@ class PowerVRRuntimeTest(unittest.TestCase):
             self.assertEqual(entries[name], ('file', 0o755, content))
         self.assertIn('dxvk/x64/d3d9.dll', entries)
 
+    def add_mali_payload(self, plain_arm64=False, missing=None):
+        from tools.tests.test_proton_wrapper import pe_fixture, plain_arm64_fixture
+        (self.root / "tools/hybris/run-proton.py").write_bytes((runtime.ROOT / "tools/hybris/run-proton.py").read_bytes())
+        files = {}
+        for arch, machine in (("i386-windows", 0x14c), ("x86_64-windows", 0x8664), ("aarch64-windows", 0xaa64)):
+            for name in ("d3d8.dll", "d3d9.dll", "d3d10core.dll", "d3d11.dll", "dxgi.dll"):
+                path = "dxvk-mali/" + arch + "/" + name
+                if path == missing:
+                    continue
+                files[path] = (plain_arm64_fixture() if plain_arm64 and arch == "aarch64-windows"
+                               else pe_fixture(machine, arm64x=arch == "aarch64-windows"))
+        self.add_upstream_dxvk(files)
+        return files
+
+    def test_mali_bundle_preserves_all_three_architectures(self):
+        files = self.add_mali_payload()
+        entries = self.assembled()
+        runtime.verify(self.root)
+        for name, data in files.items():
+            self.assertEqual(entries[name], ("file", 0o755, data))
+
+    def test_mali_bundle_rejects_plain_arm64_even_with_matching_pins(self):
+        self.add_mali_payload(plain_arm64=True)
+        with self.assertRaisesRegex(ValueError, "plain ARM64"):
+            self.assembled()
+
+    def test_mali_bundle_rejects_missing_native_architecture_file(self):
+        self.add_mali_payload(missing="dxvk-mali/aarch64-windows/dxgi.dll")
+        with self.assertRaisesRegex(ValueError, "missing runtime file"):
+            self.assembled()
+
     def test_second_dxvk_payload_with_wrong_pe_architecture_is_rejected(self):
         self.add_upstream_dxvk(upstream_dxvk('2.6.2', lambda arch: 'x64' if arch == 'x32' else 'x32'))
         with self.assertRaisesRegex(ValueError, 'wrong PE architecture: dxvk-2.6.2/'):

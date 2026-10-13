@@ -8,6 +8,7 @@ remain in tools/{hybris,dxvk,vulkan-wsi}; release.json pins their reviewed input
 import argparse
 import hashlib
 import io
+import importlib.util
 import json
 import os
 from pathlib import Path, PurePosixPath
@@ -273,6 +274,29 @@ def check_bundle(entries, release, root):
         content = read(entries, name)
         if content[:6] != b"\x7fELF\x02\x01" or content[18:20] != b"\xb7\x00":
             raise ValueError("runtime library is not ELF64 AArch64: " + name)
+    # Reuse the launcher's ARM64X verifier so assembly and launch enforce the same format.
+    if any(name.startswith("dxvk-mali/") for name in entries):
+        spec = importlib.util.spec_from_file_location("bundled_proton_validation", root / "tools/hybris/run-proton.py")
+        wrapper = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(wrapper)
+
+        class BundledFile:
+            def __init__(self, name):
+                self.name = name
+            def __str__(self):
+                return self.name
+            def read_bytes(self):
+                return read(entries, self.name)
+            def open(self, mode):
+                return io.BytesIO(self.read_bytes())
+
+        for architecture, machine in wrapper.PE_MACHINES.items():
+            for name in ("d3d8.dll", "d3d9.dll", "d3d10core.dll", "d3d11.dll", "dxgi.dll"):
+                dll = BundledFile("dxvk-mali/" + architecture + "/" + name)
+                wrapper.check_machine(dll, machine)
+                if architecture == "aarch64-windows":
+                    wrapper.check_arm64x(dll)
+
     # dxvk/ is the default payload; run-proton.py can select another dxvk-* sibling by name.
     payloads = sorted({name.split("/")[0] for name in entries if re.fullmatch(r"dxvk[^/]*/x(32|64)/[^/]+\.dll", name)})
     if "dxvk" not in payloads:

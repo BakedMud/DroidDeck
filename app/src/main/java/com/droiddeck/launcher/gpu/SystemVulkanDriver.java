@@ -6,6 +6,7 @@ import android.system.ErrnoException;
 import android.system.Os;
 import android.system.OsConstants;
 import com.droiddeck.launcher.core.FileUtils;
+import com.droiddeck.launcher.session.SessionPrefs;
 import com.droiddeck.launcher.core.TarZst;
 import java.io.File;
 import java.io.IOException;
@@ -76,7 +77,10 @@ public final class SystemVulkanDriver {
         "dxvk/x32/d3d8.dll", "dxvk/x32/d3d9.dll", "dxvk/x32/d3d10core.dll",
         "dxvk/x32/d3d11.dll", "dxvk/x32/dxgi.dll",
         "dxvk/x64/d3d8.dll", "dxvk/x64/d3d9.dll", "dxvk/x64/d3d10core.dll",
-        "dxvk/x64/d3d11.dll", "dxvk/x64/dxgi.dll"
+        "dxvk/x64/d3d11.dll", "dxvk/x64/dxgi.dll",
+        "dxvk-mali/i386-windows/d3d8.dll", "dxvk-mali/i386-windows/d3d9.dll", "dxvk-mali/i386-windows/d3d10core.dll", "dxvk-mali/i386-windows/d3d11.dll", "dxvk-mali/i386-windows/dxgi.dll",
+        "dxvk-mali/x86_64-windows/d3d8.dll", "dxvk-mali/x86_64-windows/d3d9.dll", "dxvk-mali/x86_64-windows/d3d10core.dll", "dxvk-mali/x86_64-windows/d3d11.dll", "dxvk-mali/x86_64-windows/dxgi.dll",
+        "dxvk-mali/aarch64-windows/d3d8.dll", "dxvk-mali/aarch64-windows/d3d9.dll", "dxvk-mali/aarch64-windows/d3d10core.dll", "dxvk-mali/aarch64-windows/d3d11.dll", "dxvk-mali/aarch64-windows/dxgi.dll"
     };
 
     private SystemVulkanDriver() {}
@@ -189,7 +193,12 @@ public final class SystemVulkanDriver {
         return usesDefault(isSupportedGpu(), choice);
     }
 
-    /** The bundled DXVK profile requires features missing from Mali; keep its choices editable. */
+    /** Mali owns DXVK selection only after the user enables the experimental payload. */
+    public static boolean managesDxvk(Context context, String choice) {
+        return usesDefault(isMali() && SessionPrefs.INSTANCE.experimentalMaliDxvk(context), choice)
+                || managesDxvk(choice);
+    }
+
     public static boolean managesDxvk(String choice) {
         Profile selected = profile();
         return usesDefault(selected != null && selected.dxvkPayload != null, choice);
@@ -290,10 +299,14 @@ public final class SystemVulkanDriver {
         try { directory = prepare(context); }
         catch (IOException error) { throw new IllegalStateException("System Vulkan runtime is unavailable", error); }
         addEnvironment(directory, systemHalPath(), requiresRenderNode() ? renderNodePath() : null,
-                Build.VERSION.SDK_INT, environment);
+                Build.VERSION.SDK_INT, environment, SessionPrefs.INSTANCE.experimentalMaliDxvk(context));
     }
 
     static void addEnvironment(File directory, String hal, String node, int sdk, List<String> environment) {
+        addEnvironment(directory, hal, node, sdk, environment, false);
+    }
+
+    static void addEnvironment(File directory, String hal, String node, int sdk, List<String> environment, boolean experimentalMali) {
         Profile selected = Profile.fromHal(hal);
         if (selected == null) throw new IllegalStateException("System Vulkan driver is unavailable");
         if (selected.requiresRenderNode && node == null)
@@ -317,8 +330,11 @@ public final class SystemVulkanDriver {
         }
         if (selected.extraLayerPath != null)
             environment.add("DROIDDECK_HYBRIS_LAYER_PATH=" + selected.extraLayerPath);
-        if (selected.dxvkPayload != null)
-            environment.add("DROIDDECK_HYBRIS_DXVK=" + selected.dxvkPayload);
+        String dxvkPayload = selected == Profile.MALI && experimentalMali ? "dxvk-mali" : selected.dxvkPayload;
+        if (dxvkPayload != null)
+            environment.add("DROIDDECK_HYBRIS_DXVK=" + dxvkPayload);
+        if (selected == Profile.MALI && experimentalMali)
+            environment.add("DXVK_MALI_COMPAT=1");
         // The outer compositor always uses Android-buffer Wayland presentation.
         environment.add("BL_GAMESCOPE_BACKEND=sdl");
         if (selected.requiresRenderNode) {
@@ -332,8 +348,8 @@ public final class SystemVulkanDriver {
         environment.add("DROIDDECK_SYSTEM_VULKAN_GPU=" + selected.id);
         environment.add("DROIDDECK_SYSTEM_VULKAN_RUNTIME=" + directory.getPath());
         environment.add("DROIDDECK_SYSTEM_VULKAN_PRESENTATION=" + selected.presentation);
-        environment.add("DROIDDECK_SYSTEM_VULKAN_DXVK=" + (selected.dxvkPayload == null ? "user" : "managed"));
-        // Older helpers use this name for both managed profiles. Mali must retain its own DXVK choice.
+        environment.add("DROIDDECK_SYSTEM_VULKAN_DXVK=" + (dxvkPayload == null ? "user" : "managed"));
+        // Keep the legacy alias limited to its original vendor profiles.
         if (selected.dxvkPayload != null)
             environment.add("DROIDDECK_POWERVR_RUNTIME=" + directory.getPath());
     }
