@@ -62,7 +62,7 @@ internal class DriverMenus(private val activity: Activity, private val ui: Handl
 
     var experimentalMaliDxvk by mutableStateOf(false)
 
-    fun setExperimentalMaliDxvk(enabled: Boolean) {
+    fun selectExperimentalMaliDxvk(enabled: Boolean) {
         if (!SystemVulkanDriver.isMali() || com.droiddeck.launcher.session.SessionState.running) return
         SessionPrefs.setExperimentalMaliDxvk(activity, enabled)
         experimentalMaliDxvk = enabled
