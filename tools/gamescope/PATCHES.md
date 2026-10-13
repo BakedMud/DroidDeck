@@ -45,7 +45,7 @@ library list, before anything is published.
   `GAMESCOPE_FOCUSABLE_WINDOWS`, so the client kept its loading screen over the running game
   (Skyrim SE, A Plague Tale: Innocence, on the games' own Xwayland). MapNotify now refreshes the flag.
 
-The system PowerVR driver uses the existing SDL/Wayland swapchain backend. Its additional patches are:
+The system GPU paths use the existing SDL/Wayland swapchain backend. Their additional patches are:
 
 - `0120-nested-swapchain-capability-fallback.patch`: negotiate the surface's usages, mutable-format
   support, image count, alpha and extent; use offscreen composition and GPU copies when required.
@@ -59,6 +59,26 @@ The system PowerVR driver uses the existing SDL/Wayland swapchain backend. Its a
 - `0124-sdl-preserve-explicit-refresh.patch` and `0125-sdl-wait-before-present.patch`: preserve
   configured refresh across SDL events and finish composition before presenting without a
   render-finished semaphore. The build runs the focused capability, format and refresh tests.
+- `0126-shm-commit-ready.patch`: mark an SHM texture ready after its synchronous upload instead
+  of exporting image memory and treating the returned DMA-BUF fd as a sync fence. Explicit
+  acquire events and real DMA-BUF commits retain their existing wait paths. The build compiles
+  and runs the extracted production dispatch against SHM, explicit-acquire and DMA-BUF mocks.
+- `0127-refresh-shm-buffer-contents.patch`: upload a fresh texture for every SHM commit. The
+  texture cache remains enabled for DMA-BUF imports, which reference the producer's allocation;
+  SHM imports are snapshots and otherwise replay old pixels when a client reuses its buffers.
+  The build tests the production import function with reused buffers and retained older commits.
+- `0128-keep-swapchain-shm-textures-internal.patch`: keep SHM uploads internal on Vulkan-swapchain
+  backends, which sample them locally rather than consuming exported input buffers. This avoids
+  unsupported DMA-BUF allocations, optimal-image layout queries and foreign ownership transfers
+  on the SDL path. Backends that forward or scan out input buffers retain their export behavior.
+  The build tests the actual SHM texture flags for both backend types.
+- `0129-keep-swapchain-cursors-internal.patch`: keep Xwayland SHM cursor textures internal on
+  Vulkan-swapchain backends. The trace proves generic `CVulkanTexture` DMA-BUF-attribute cleanup
+  closed fd 0 after Wayland assigned it to Xwayland SHM; it does not identify an individual cursor
+  allocation or driver return as that source. SDL samples its cursor texture locally, so this removes
+  the remaining cursor external-FD ownership path. Cursor textures remain exportable for
+  hardware-plane and forwarding backends, and the existing linear requirement for a hardware cursor
+  plane is unchanged. The build tests the extracted production flags; device validation is pending.
 
 Sixteen more of Armada's patches are DRM/lease/HDR-on-KMS work for a native display, which this
 app's Wayland-hosted gamescope never reaches, or need a newer gamescope than the runtime has.

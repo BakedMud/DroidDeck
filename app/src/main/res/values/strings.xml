@@ -1943,12 +1943,14 @@
 
     <!-- GPU support line -->
     <string name="gpuinfo_not_adreno">Not an Adreno GPU</string>
-    <string name="gpuinfo_powervr">System PowerVR driver: compatibility varies by device</string>
-    <string name="gpu_system_powervr">System PowerVR</string>
+    <string name="gpuinfo_system_driver">System %1$s driver: compatibility varies by device</string>
+    <string name="gpuinfo_system_experimental">Experimental system %1$s driver: compatibility varies by device</string>
+    <string name="gpu_system_driver">System %1$s</string>
     <string name="gpu_auto_system_hint">Uses the built-in drivers for this GPU</string>
-    <string name="drivers_powervr_builtin">The system PowerVR driver is selected for the runtime and display.</string>
+    <string name="drivers_system_builtin">The system %1$s driver is selected for the runtime and display.</string>
+    <string name="drivers_system_experimental_builtin">The experimental system %1$s driver is selected for the runtime and display.</string>
     <string name="cmgr_powervr_dxvk_queued">Queued: %1$s (waiting for a different runtime driver)</string>
-    <string name="cmgr_powervr_dxvk_managed">DXVK is provided by the system PowerVR runtime. Other DXVK packages can be stored but are not applied with this driver.</string>
+    <string name="cmgr_system_dxvk_managed">DXVK is provided by the system %1$s runtime. Other DXVK packages can be stored but are not applied with this driver.</string>
     <string name="gpuinfo_supported">Supported</string>
     <string name="gpuinfo_experimental">Experimental: its drivers are test builds</string>
     <string name="gpuinfo_below_tested">Below tested hardware (Adreno 725 and newer): it may not run</string>

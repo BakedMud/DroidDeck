@@ -14,7 +14,7 @@ grep -q '^DisableSandbox' /etc/pacman.conf || sed -i 's/^\[options\]/[options]\n
 # concrete mirrors ahead of it so pacman has somewhere to fall over to.
 { for m in https://ca.us.mirror.archlinuxarm.org https://fl.us.mirror.archlinuxarm.org https://de3.mirror.archlinuxarm.org https://nl.mirror.archlinuxarm.org; do echo "Server = $m/\$arch/\$repo"; done; cat /etc/pacman.d/mirrorlist; } > /etc/pacman.d/mirrorlist.new
 mv /etc/pacman.d/mirrorlist.new /etc/pacman.d/mirrorlist
-pacman -Syu --noconfirm --needed git sudo zstd binutils
+pacman -Syu --noconfirm --needed git sudo zstd binutils python
 # makepkg refuses root; a builder user with passwordless sudo installs the dependencies.
 id builder >/dev/null 2>&1 || useradd -m builder
 echo 'builder ALL=(ALL) NOPASSWD: ALL' > /etc/sudoers.d/builder
@@ -58,6 +58,11 @@ cd "$WORK"
 g++ -std=c++17 -Wall -Wextra -Werror -UNDEBUG -I pkg/arch/src/gamescope/src \
   tools/gamescope/tests/nested-swapchain.cpp -o pkg/test-nested-swapchain
 pkg/test-nested-swapchain
+g++ -std=c++17 -Wall -Wextra -Werror -UNDEBUG -I pkg/arch/src/gamescope/src \
+  tools/gamescope/tests/shm-commit-sync.cpp -o pkg/test-shm-commit-sync
+pkg/test-shm-commit-sync
+python3 tools/gamescope/tests/shm-buffer-memoizer-regression.py \
+  pkg/arch/src/gamescope/src/steamcompmgr.cpp
 rm -rf out && mkdir -p out/usr/local/bin
 PKG=$(ls pkg/arch/gamescope-*.pkg.tar.* | grep -v -- '-debug-' | head -1)
 tar -xf "$PKG" -C out --strip-components=2 usr/bin/gamescope

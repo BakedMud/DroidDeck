@@ -222,10 +222,10 @@ object SessionPrefs {
 
     /** Also called by direct session launches, which may never open the driver settings. */
     @JvmStatic
-    fun ensurePowerVrAutoDrivers(context: Context) = ensurePowerVrAutoDrivers(context, SystemVulkanDriver.isPowerVr())
+    fun ensureSystemVulkanAutoDrivers(context: Context) = ensureSystemVulkanAutoDrivers(context, SystemVulkanDriver.isSupportedGpu())
 
-    internal fun ensurePowerVrAutoDrivers(context: Context, powerVr: Boolean) {
-        if (!powerVr || gpuDriverMode(context) != GPU_DRIVERS_AUTO) return
+    internal fun ensureSystemVulkanAutoDrivers(context: Context, systemVulkan: Boolean) {
+        if (!systemVulkan || gpuDriverMode(context) != GPU_DRIVERS_AUTO) return
         prefs(context).edit().putString("linuxDriver", "").putString("androidDriver", TurnipDriver.AUTO).apply()
     }
 

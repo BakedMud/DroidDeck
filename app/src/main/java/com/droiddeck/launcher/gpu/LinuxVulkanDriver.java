@@ -22,7 +22,7 @@ import java.util.function.Supplier;
  *
  * <p>"" (the default) means the driver the runtime was built with, at
  * {@code usr/lib/libvulkan_freedreno.so} on Adreno, or the bundled bridge to the system
- * PowerVR driver.
+ * Vulkan driver.
  * Otherwise the value is an imported driver's id ({@link LinuxVulkanDriverManager}), and the
  * session is handed that driver's ICD manifest in {@code BL_VK_DRIVER}: the session script points
  * the Vulkan loader at it with {@code VK_DRIVER_FILES} after checking both the manifest and the
@@ -53,13 +53,13 @@ public final class LinuxVulkanDriver {
 
     /**
      * Label for a stored value. Missing imports fall back to the runtime on Adreno;
-     * PowerVR requires another explicit selection or Auto before launching.
+     * System Vulkan requires another explicit selection or Auto before launching.
      */
     public static String optionLabel(Context context, String value) {
-        if (value == null || value.isEmpty()) return SystemVulkanDriver.isPowerVr()
-                ? context.getString(R.string.gpu_system_powervr) : "Runtime default (built into the runtime)";
+        if (value == null || value.isEmpty()) return SystemVulkanDriver.isSupportedGpu()
+                ? context.getString(R.string.gpu_system_driver, SystemVulkanDriver.gpuName()) : "Runtime default (built into the runtime)";
         LinuxVulkanDriverManager m = new LinuxVulkanDriverManager(context);
-        if (!m.isInstalled(value)) return value + (SystemVulkanDriver.isPowerVr()
+        if (!m.isInstalled(value)) return value + (SystemVulkanDriver.isSupportedGpu()
                 ? " (imported, missing)" : " (imported, missing - uses the runtime default)");
         String ver = m.getDriverVersion(value);
         return m.getDriverName(value) + (ver.isEmpty() ? "" : " " + ver) + " (imported)";
@@ -67,28 +67,28 @@ public final class LinuxVulkanDriver {
 
     /**
      * The ICD manifest path to hand the session, or null to leave the runtime's own driver alone.
-     * A missing import uses the runtime's own driver on Adreno. PowerVR fails clearly instead:
+     * A missing import uses the runtime's own driver on Adreno. System Vulkan fails clearly instead:
      * its system backend needs environment setup that an explicit import does not receive.
      */
     public static String resolveIcdPath(Context context, String value) {
-        boolean powerVr = SystemVulkanDriver.isPowerVr();
-        return resolveIcdPath(value, powerVr,
+        boolean systemGpu = SystemVulkanDriver.isSupportedGpu();
+        return resolveIcdPath(value, systemGpu,
                 () -> SystemVulkanDriver.icdPath(context), id -> {
                     String icd = new LinuxVulkanDriverManager(context).getIcdPath(id);
                     if (icd == null) Log.w(TAG, "imported Linux driver \"" + id + "\" is gone"
-                            + (powerVr ? "" : "; using the runtime's own driver"));
+                            + (systemGpu ? "" : "; using the runtime's own driver"));
                     else Log.i(TAG, "Linux session draws with imported driver " + id + " (" + icd + ")");
                     return icd;
                 });
     }
 
     /** Resolve the selected backend before looking up an imported driver. */
-    static String resolveIcdPath(String value, boolean powerVr, Supplier<String> systemIcd,
+    static String resolveIcdPath(String value, boolean systemGpu, Supplier<String> systemIcd,
                                  Function<String, String> importedIcd) {
-        if (SystemVulkanDriver.usesDefault(powerVr, value)) return systemIcd.get();
+        if (SystemVulkanDriver.usesDefault(systemGpu, value)) return systemIcd.get();
         if (value == null || value.isEmpty()) return null;
         String icd = importedIcd.apply(value);
-        if (powerVr && icd == null) throw new IllegalStateException(
+        if (systemGpu && icd == null) throw new IllegalStateException(
                 "Selected Linux Vulkan driver \"" + value + "\" is unavailable. Select an installed driver or use Auto.");
         return icd;
     }

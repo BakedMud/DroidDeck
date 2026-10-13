@@ -75,8 +75,6 @@ def required():
     paths += ['assets/linuxfs/i386/libfaultreport.so']
     paths += ['assets/linuxfs/usr/local/lib/droiddeck-msitools/' + name for name in
               ['msiinfo', 'cabextract', '7z', '7z.so', 'libmsi-1.0.so.0', 'libgsf-1.so.114', 'libgcab-1.0.so.0']]
-    paths += ['assets/linuxfs/usr/local/lib/droiddeck-xclipse/' + name for name in
-              ['libVkLayer_droiddeck_xclipse.so', 'VkLayer_droiddeck_xclipse.json']]
     paths += ['assets/linuxfs/usr/local/lib/droiddeck-vr/' + name for name in
               ['droiddeck/bin/linuxarm64/driver_droiddeck.so', 'droiddeck/driver.vrdrivermanifest',
                'droiddeck/resources/settings/default.vrsettings', 'layer/libVkLayer_droiddeck_vr.so',

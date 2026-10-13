@@ -57,6 +57,8 @@ internal class DriverMenus(private val activity: Activity, private val ui: Handl
     /** The bundle both drivers are set to, as "DD-Turnip 0.1.0", or null when they are not one. */
     var activeBundle by mutableStateOf<String?>(null)
     private var autoCheckedThisProcess = false
+    private val systemGpu: Boolean get() = gpu.family.systemProfile != null
+    private val systemDriverName: String get() = gpu.family.systemProfile?.gpuName.orEmpty()
 
     fun state() = GpuDriversState(
         gpuName = gpu.displayName(activity), gpuFamily = gpu.family.label(activity), soc = gpu.soc, supportText = gpu.supportText(activity),
@@ -65,8 +67,10 @@ internal class DriverMenus(private val activity: Activity, private val ui: Handl
         autoStatus = autoStatus, releaseStatus = releaseStatus.ifEmpty { activity.getString(R.string.drivers_not_checked) }, checking = releaseChecking,
         linuxRows = linuxRows, linuxSelected = linuxSelected, androidRows = androidRows, androidSelected = androidSelected,
         linuxDownloads = linuxDownloads, androidDownloads = androidDownloads, canRestoreBundled = canRestoreBundled,
-        activeBundle = activeBundle, powerVr = gpu.family == GpuInfo.Family.POWERVR,
-        systemPowerVr = SystemVulkanDriver.usesDefault(linuxSelected),
+        activeBundle = activeBundle,
+        systemVulkan = SystemVulkanDriver.usesDefault(linuxSelected),
+        runtimeManagedDxvk = SystemVulkanDriver.managesDxvk(linuxSelected),
+        systemGpu = systemGpu, systemDriverName = systemDriverName,
     )
     var androidRows by mutableStateOf<List<DriverRow>>(emptyList())
     var androidSelected by mutableStateOf("")
@@ -79,7 +83,7 @@ internal class DriverMenus(private val activity: Activity, private val ui: Handl
             DriverRow(id, it.label, activity.getString(if (linux) R.string.drivers_bundle_sets_display else R.string.drivers_bundle_sets_runtime), true, DriverRow.BUNDLE)
         }
         linuxRows = LinuxVulkanDriver.optionValues(activity).map { id ->
-            if (id.isEmpty()) DriverRow("", activity.getString(if (gpu.family == GpuInfo.Family.POWERVR) R.string.gpu_system_powervr else R.string.gpu_runtime_default), activity.getString(if (SystemVulkanDriver.usesDefault(id)) R.string.drivers_system_vulkan else R.string.drivers_runtime_builtin), false)
+            if (id.isEmpty()) DriverRow("", if (systemGpu) activity.getString(R.string.gpu_system_driver, systemDriverName) else activity.getString(R.string.gpu_runtime_default), activity.getString(if (SystemVulkanDriver.usesDefault(id)) R.string.drivers_system_vulkan else R.string.drivers_runtime_builtin), false)
             else bundleRow(id, linux = true) ?: DriverRow(
                 id, lm.getDriverName(id),
                 listOfNotNull(
@@ -112,7 +116,7 @@ internal class DriverMenus(private val activity: Activity, private val ui: Handl
     /** One line for the settings row that opens this: "Auto · WinNative · Balanced". */
     fun summary(): String {
         val active = pairRows.firstOrNull { it.active }?.name ?: activeBundle
-            ?: if (SystemVulkanDriver.usesDefault(linuxSelected) && androidSelected == TurnipDriver.AUTO) activity.getString(R.string.gpu_system_powervr) else null
+            ?: if (SystemVulkanDriver.usesDefault(linuxSelected) && androidSelected == TurnipDriver.AUTO) activity.getString(R.string.gpu_system_driver, systemDriverName) else null
         val label = activity.getString(if (mode == SessionPrefs.GPU_DRIVERS_AUTO) R.string.common_auto else R.string.drivers_manual)
         return active?.let { activity.getString(R.string.drivers_summary, label, it) } ?: label
     }
@@ -155,10 +159,10 @@ internal class DriverMenus(private val activity: Activity, private val ui: Handl
     fun ensureAuto(force: Boolean) {
         mode = SessionPrefs.gpuDriverMode(activity)
         if (mode != SessionPrefs.GPU_DRIVERS_AUTO || pairBusy != null || releaseChecking) return
-        if (gpu.family == GpuInfo.Family.POWERVR) {
+        if (systemGpu) {
             // Auto owns both choices. Manual imports remain available when Manual is selected.
-            SessionPrefs.ensurePowerVrAutoDrivers(activity)
-            autoStatus = activity.getString(R.string.drivers_powervr_builtin)
+            SessionPrefs.ensureSystemVulkanAutoDrivers(activity)
+            autoStatus = activity.getString(if (gpu.family == GpuInfo.Family.MALI || gpu.family == GpuInfo.Family.XCLIPSE) R.string.drivers_system_experimental_builtin else R.string.drivers_system_builtin, systemDriverName)
             refreshDrivers()
             return
         }

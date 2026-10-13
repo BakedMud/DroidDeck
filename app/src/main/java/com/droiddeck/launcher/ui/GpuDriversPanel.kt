@@ -84,9 +84,13 @@ class GpuDriversState(
     val supported: Boolean = true,
     val unsupported: Boolean = false,
     val auto: Boolean = true,
-    val powerVr: Boolean = false,
-    /** The selected runtime supplies DXVK for PowerVR game launches. */
-    val systemPowerVr: Boolean = false,
+    /** A GPU whose Auto choice uses its Android system driver. */
+    val systemGpu: Boolean = false,
+    /** The selected runtime uses the system Vulkan bridge. */
+    val systemVulkan: Boolean = false,
+    /** Only runtimes with a compatible bundled DXVK own component selection. */
+    val runtimeManagedDxvk: Boolean = false,
+    val systemDriverName: String = "",
     val pairs: List<PairRow> = emptyList(),
     /** The pair key being installed, and how far along (-1 = unknown). */
     val busy: String? = null,

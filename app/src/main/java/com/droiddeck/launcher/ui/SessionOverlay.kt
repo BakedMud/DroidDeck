@@ -276,8 +276,9 @@ class DrawerActions(
     val onClose: () -> Unit,
     /** Games tab: every Proton with what it uses; null until first read. */
     val components: ComponentsManager.Snapshot? = null,
-    /** DXVK is supplied by the selected system PowerVR runtime. */
-    val systemPowerVr: Boolean = false,
+    /** DXVK is supplied by the selected system Vulkan profile. */
+    val runtimeManagedDxvk: Boolean = false,
+    val systemDriverName: String = "",
     /** Re-reads the Protons (and runs swaps that waited for a game to close). */
     val onComponentsRefresh: () -> Unit = {},
     val componentCatalog: List<ComponentsManager.CatalogItem> = emptyList(),
@@ -1132,7 +1133,7 @@ private fun SelectedGameProfileGroup(host: MenuHost, a: DrawerActions, track: (S
                 if (!value.inherited) {
                     ProfileSummaryRow(
                         ComponentsManager.LABEL.getValue(component),
-                        if (ComponentsManager.runtimeManaged(component, a.systemPowerVr)) stringResource(R.string.gpu_system_powervr)
+                        if (ComponentsManager.runtimeManaged(component, a.runtimeManagedDxvk)) stringResource(R.string.gpu_system_driver, a.systemDriverName)
                         else profileValueLabel(value),
                     )
                 }
@@ -1236,7 +1237,7 @@ private fun ComponentsDrawerPage(host: MenuHost, a: DrawerActions, track: (Strin
             }
             for (comp in ComponentsManager.COMPONENTS) {
                 val value = gameProfile.components.getValue(comp)
-                val managedDxvk = ComponentsManager.runtimeManaged(comp, a.systemPowerVr)
+                val managedDxvk = ComponentsManager.runtimeManaged(comp, a.runtimeManagedDxvk)
                 val options: List<Pair<String?, String>> =
                     listOf(null to stringResource(R.string.comp_game_use_general)) +
                         if (managedDxvk) emptyList() else snap.packages.filter { it.comp == comp }.map { it.file to it.version }
@@ -1244,7 +1245,7 @@ private fun ComponentsDrawerPage(host: MenuHost, a: DrawerActions, track: (Strin
                     host = host,
                     key = "game-cmp-$comp",
                     label = ComponentsManager.LABEL.getValue(comp),
-                    hint = if (managedDxvk) stringResource(R.string.cmgr_powervr_dxvk_managed) else if (value.inherited) {
+                    hint = if (managedDxvk) stringResource(R.string.cmgr_system_dxvk_managed, a.systemDriverName) else if (value.inherited) {
                         stringResource(R.string.drawer_component_inherited, value.value)
                     } else {
                         null
@@ -1252,7 +1253,7 @@ private fun ComponentsDrawerPage(host: MenuHost, a: DrawerActions, track: (Strin
                     options = options,
                     selected = gameProfile.componentFiles[comp],
                     enabled = !managedDxvk || gameProfile.componentFiles[comp] != null,
-                    valueLabel = if (managedDxvk) stringResource(R.string.gpu_system_powervr) else null,
+                    valueLabel = if (managedDxvk) stringResource(R.string.gpu_system_driver, a.systemDriverName) else null,
                     chipModifier = track("cmp-$comp"),
                     onPick = { file -> a.onGameComponent(gameProfile.appId, comp, file) },
                 )
@@ -1289,7 +1290,7 @@ private fun ComponentsDrawerPage(host: MenuHost, a: DrawerActions, track: (Strin
                     Row(modifier = Modifier.fillMaxWidth().padding(top = 3.dp)) {
                         Text(ComponentsManager.LABEL.getValue(comp), fontSize = 12.sp, color = colors.onSurfaceVariant, modifier = Modifier.width(96.dp))
                         Text(
-                            if (ComponentsManager.runtimeManaged(comp, a.systemPowerVr)) stringResource(R.string.gpu_system_powervr)
+                            if (ComponentsManager.runtimeManaged(comp, a.runtimeManagedDxvk)) stringResource(R.string.gpu_system_driver, a.systemDriverName)
                             else r.components.getValue(comp).inUse,
                             fontSize = 12.sp, color = colors.onBackground, maxLines = 1, overflow = TextOverflow.Ellipsis,
                         )
@@ -1320,7 +1321,7 @@ private fun ComponentsDrawerPage(host: MenuHost, a: DrawerActions, track: (Strin
         val build = ComponentsManager.safeName(p.version)
         for (comp in ComponentsManager.COMPONENTS) {
             val st = view.components.getValue(comp)
-            val managedDxvk = ComponentsManager.runtimeManaged(comp, a.systemPowerVr)
+            val managedDxvk = ComponentsManager.runtimeManaged(comp, a.runtimeManagedDxvk)
             val originals = view.originals.filter { it.comp == comp }
             val options = originals.map { "orig:${it.protonVersion}" to (if (it.protonVersion == build) originalLabel else stringResource(R.string.comp_original, it.protonVersion)) } +
                 snap.packages.filter { it.comp == comp }.map { it.file to it.version }
@@ -1330,12 +1331,12 @@ private fun ComponentsDrawerPage(host: MenuHost, a: DrawerActions, track: (Strin
             DrawerStackedChoice(
                 host, "cmp-$comp", ComponentsManager.LABEL.getValue(comp),
                 // The box already shows the choice: only say more when there is more to say.
-                if (managedDxvk) stringResource(R.string.cmgr_powervr_dxvk_managed) +
+                if (managedDxvk) stringResource(R.string.cmgr_system_dxvk_managed, a.systemDriverName) +
                     (st.queued?.let { "\n" + stringResource(R.string.cmgr_powervr_dxvk_queued, it) } ?: "")
                 else st.queued?.let { stringResource(R.string.comp_next_queued, it) } ?: st.inUse.takeIf { it != shown },
                 options, current,
                 enabled = !managedDxvk,
-                valueLabel = if (managedDxvk) stringResource(R.string.gpu_system_powervr) else null,
+                valueLabel = if (managedDxvk) stringResource(R.string.gpu_system_driver, a.systemDriverName) else null,
                 note = if (view.inUseByGame) stringResource(R.string.comp_waits_long) else stringResource(R.string.comp_applies_long),
                 chipModifier = track("cmp-$comp"),
                 onPick = { v -> if (v != current || st.queued != null) a.onComponentSwap(p.id, comp, v) },

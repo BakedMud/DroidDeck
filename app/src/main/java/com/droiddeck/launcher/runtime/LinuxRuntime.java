@@ -201,7 +201,7 @@ public final class LinuxRuntime {
         bind(cmd, "/dev");
         bind(cmd, "/proc");
         bind(cmd, "/sys");
-        if (com.droiddeck.launcher.gpu.SystemVulkanDriver.isPowerVr()) {
+        if (SystemVulkanDriver.isSupportedGpu()) {
             // The glibc bridge loads the device's existing Android HAL and its dependencies.
             // These read-only Android partitions remain subject to the app's normal permissions.
             for (String path : new String[]{"/system", "/vendor", "/apex", "/system_ext", "/product", "/odm"})
@@ -285,9 +285,9 @@ public final class LinuxRuntime {
                 bind(cmd, fake.getPath() + ":" + entry[1]);
             }
         }
-        if (com.droiddeck.launcher.gpu.SystemVulkanDriver.isPowerVr()) {
-            bindPowerVrGpuNode(context, cmd);
-        } else {
+        if (SystemVulkanDriver.requiresRenderNode()) {
+            bindSystemVulkanGpuNode(context, cmd);
+        } else if (!SystemVulkanDriver.isSupportedGpu()) {
             bindGpuNode(context, cmd);
         }
         bindAdrenoStats(cmd, extraBinds);
@@ -301,11 +301,11 @@ public final class LinuxRuntime {
     }
 
     /**
-     * Tensor's render node is accessible directly, but Android denies listing its parent
+     * The PowerVR render node may be accessible directly, but Android denies listing its parent
      * directory. libdrm enumerates that directory even when given the device number. Expose
      * the real node through a listable private directory; retain its real sysfs identity.
      */
-    private static void bindPowerVrGpuNode(Context context, List<String> cmd) {
+    private static void bindSystemVulkanGpuNode(Context context, List<String> cmd) {
         if (new File("/dev/dri").list() != null) return;
         String node = SystemVulkanDriver.renderNodePath();
         if (node == null) return;
@@ -316,12 +316,12 @@ public final class LinuxRuntime {
             if (!dri.isDirectory() && !dri.mkdirs()) return;
             new File(dri, name).createNewFile();
         } catch (IOException e) {
-            android.util.Log.w("LinuxRuntime", "Cannot expose the PowerVR render node", e);
+            android.util.Log.w("LinuxRuntime", "Cannot expose the system Vulkan render node", e);
             return;
         }
         bind(cmd, dri.getPath() + ":/dev/dri");
         bind(cmd, node + ":" + node);
-        android.util.Log.i("LinuxRuntime", "PowerVR: exposing real " + name + " through a listable directory");
+        android.util.Log.i("LinuxRuntime", "System Vulkan: exposing real " + name + " through a listable directory");
     }
 
     /**

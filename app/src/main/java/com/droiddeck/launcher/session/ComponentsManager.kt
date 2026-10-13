@@ -699,14 +699,14 @@ object ComponentsManager {
         return PreparedLaunchState(lines.toString(), keep)
     }
 
-    /** DXVK is supplied at game launch by the selected system PowerVR runtime. */
-    internal fun runtimeManaged(comp: String, systemPowerVr: Boolean): Boolean = comp == "dxvk" && systemPowerVr
+    /** DXVK is supplied at game launch by profiles with a compatible bundled payload. */
+    internal fun runtimeManaged(comp: String, runtimeManagedDxvk: Boolean): Boolean = comp == "dxvk" && runtimeManagedDxvk
 
     private fun runtimeManaged(context: Context, comp: String): Boolean =
-        runtimeManaged(comp, SystemVulkanDriver.usesDefault(SessionPrefs.linuxDriver(context)))
+        runtimeManaged(comp, SystemVulkanDriver.managesDxvk(SessionPrefs.linuxDriver(context)))
 
     private fun requireSelectable(context: Context, comp: String, managed: (String) -> Boolean = { runtimeManaged(context, it) }) {
-        check(!managed(comp)) { context.getString(R.string.cmgr_powervr_dxvk_managed) }
+        check(!managed(comp)) { context.getString(R.string.cmgr_system_dxvk_managed, SystemVulkanDriver.gpuName()) }
     }
 
     // ------------------------------------------------------------------ actions

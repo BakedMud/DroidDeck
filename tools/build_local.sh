@@ -102,11 +102,6 @@ docker run --rm --platform linux/amd64 \
         aarch64-linux-gnu-gcc -shared -fPIC -O2 -Wall -pthread \
             -o "$d/libssbs.so" tools/linuxfs/ssbs/ssbs_adapter.c -ldl
         aarch64-linux-gnu-strip --strip-unneeded "$d/libssbs.so"
-        mkdir -p "$d/usr/local/lib/droiddeck-xclipse"
-        aarch64-linux-gnu-gcc -shared -fPIC -O2 -Wall -Wextra -Wno-unused-parameter -fvisibility=hidden -pthread \
-            -o "$d/usr/local/lib/droiddeck-xclipse/libVkLayer_droiddeck_xclipse.so" tools/linuxfs/xclipse-layer/xclipse_layer.c -ldl
-        aarch64-linux-gnu-strip --strip-unneeded "$d/usr/local/lib/droiddeck-xclipse/libVkLayer_droiddeck_xclipse.so"
-        install -m644 tools/linuxfs/xclipse-layer/VkLayer_droiddeck_xclipse.json "$d/usr/local/lib/droiddeck-xclipse/"
         mkdir -p "$d/usr/local/bin"
         aarch64-linux-gnu-gcc -O2 -Wall -Wextra -o "$d/usr/local/bin/droiddeck-clipboard" tools/linuxfs/clipboard/clipboard.c -ldl
         aarch64-linux-gnu-strip --strip-unneeded "$d/usr/local/bin/droiddeck-clipboard"

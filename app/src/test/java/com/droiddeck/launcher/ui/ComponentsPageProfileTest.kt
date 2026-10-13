@@ -80,14 +80,14 @@ class ComponentsPageProfileTest {
         var swapped = 0
         var restored = 0
         showDxvk(
-            systemPowerVr = true,
+            systemVulkan = true,
             onCancel = { cancelled++ },
             onImport = { imported++ },
             onSwap = { swapped++ },
             onRestore = { restored++ },
         )
 
-        compose.onNodeWithText(context.getString(R.string.cmgr_powervr_dxvk_managed)).assertExists()
+        compose.onNodeWithText(context.getString(R.string.cmgr_system_dxvk_managed, "PowerVR")).assertExists()
         compose.onNodeWithText(context.getString(R.string.cmgr_powervr_dxvk_queued, "Next DXVK"), substring = true).assertExists()
         compose.onNodeWithText("Stored DXVK").assertIsNotEnabled()
         compose.onNodeWithText(context.getString(R.string.comp_original, "1.0")).assertIsNotEnabled()
@@ -105,31 +105,31 @@ class ComponentsPageProfileTest {
     @Test @Config(qualifiers = "w1280dp-h1000dp")
     fun manualRuntimeKeepsDxvkSelectionAvailable() {
         val context = RuntimeEnvironment.getApplication()
-        showDxvk(systemPowerVr = false)
+        showDxvk(systemVulkan = false)
 
         compose.onNode(hasText("Stored DXVK") and SemanticsMatcher.expectValue(SemanticsProperties.Role, Role.RadioButton)).assertIsEnabled()
         compose.onNodeWithText(context.getString(R.string.comp_original, "1.0")).assertIsEnabled()
         compose.onNodeWithText(context.getString(R.string.comp_restore_original)).assertIsEnabled()
-        compose.onNodeWithText(context.getString(R.string.cmgr_powervr_dxvk_managed)).assertDoesNotExist()
+        compose.onNodeWithText(context.getString(R.string.cmgr_system_dxvk_managed, "PowerVR")).assertDoesNotExist()
     }
 
     @Test @Config(qualifiers = "w1280dp-h1000dp")
     fun systemPowerVrGameProfileKeepsOtherComponentChoicesAndRuntimeOptionsAvailable() {
         val context = RuntimeEnvironment.getApplication()
-        showDxvk(systemPowerVr = true)
+        showDxvk(systemVulkan = true)
         compose.onNodeWithText(context.getString(R.string.comp_scope_general)).performClick()
         compose.onNodeWithText("Game A").performClick()
         compose.waitUntil(5_000) {
             compose.onAllNodesWithText(context.getString(R.string.comp_game_reset)).fetchSemanticsNodes().isNotEmpty()
         }
 
-        compose.onNodeWithText(context.getString(R.string.gpu_system_powervr)).assertIsNotEnabled()
-        compose.onNodeWithText(context.getString(R.string.cmgr_powervr_dxvk_managed)).assertExists()
+        compose.onNodeWithText(context.getString(R.string.gpu_system_driver, "PowerVR")).assertIsNotEnabled()
+        compose.onNodeWithText(context.getString(R.string.cmgr_system_dxvk_managed, "PowerVR")).assertExists()
         val inheritedChoices = compose.onAllNodesWithText(context.getString(R.string.comp_game_use_general))
         inheritedChoices.assertCountEquals(4) // FEX preset, FEX package, Proton and VKD3D remain selectable.
         repeat(4) { inheritedChoices[it].assertIsEnabled() }
         val runtimeOptions = compose.onAllNodesWithText(context.getString(R.string.comp_game_runtime_options))
-        runtimeOptions.assertCountEquals(2)
+        runtimeOptions.onLast().assertExists()
         repeat(2) { runtimeOptions[it].assertIsEnabled() }
         compose.onNodeWithText(context.getString(R.string.comp_this_proton).uppercase()).assertDoesNotExist()
 
@@ -141,23 +141,70 @@ class ComponentsPageProfileTest {
     @Test @Config(qualifiers = "w1280dp-h1000dp")
     fun systemPowerVrGameProfileCanClearAnExistingDxvkOverrideWithoutSelectingAnother() {
         val context = RuntimeEnvironment.getApplication()
-        showDxvk(systemPowerVr = true, gameDxvkOverride = true)
+        showDxvk(systemVulkan = true, gameDxvkOverride = true)
         compose.onNodeWithText(context.getString(R.string.comp_scope_general)).performClick()
         compose.onNodeWithText("Game A").performClick()
         compose.waitUntil(5_000) {
             compose.onAllNodesWithText(context.getString(R.string.comp_game_reset)).fetchSemanticsNodes().isNotEmpty()
         }
 
-        compose.onNodeWithText(context.getString(R.string.gpu_system_powervr)).performScrollTo().assertIsEnabled().performClick()
+        compose.onNodeWithText(context.getString(R.string.gpu_system_driver, "PowerVR")).performScrollTo().assertIsEnabled().performClick()
         compose.onNodeWithText("Stored DXVK").assertDoesNotExist()
         compose.onAllNodesWithText(context.getString(R.string.comp_game_use_general)).onLast().performClick()
         compose.waitUntil(5_000) { "dxvk" !in ComponentsManager.gameComponents(context, "42") }
-        compose.onNodeWithText(context.getString(R.string.gpu_system_powervr)).assertIsNotEnabled()
+        compose.onNodeWithText(context.getString(R.string.gpu_system_driver, "PowerVR")).assertIsNotEnabled()
+    }
+
+    @Test @Config(qualifiers = "w1280dp-h1000dp")
+    fun systemMaliKeepsDxvkSelectableAndShowsTheSelectedGameComponent() {
+        val context = RuntimeEnvironment.getApplication()
+        showDxvk(
+            systemVulkan = true,
+            runtimeManagedDxvk = false,
+            systemDriverName = "Mali",
+            gameDxvkOverride = true,
+        )
+        compose.onNodeWithText(context.getString(R.string.gpu_system_driver, "Mali")).assertExists()
+        compose.onNodeWithText(context.getString(R.string.cmgr_system_dxvk_managed, "Mali")).assertDoesNotExist()
+        compose.onNode(hasText("Stored DXVK") and SemanticsMatcher.expectValue(SemanticsProperties.Role, Role.RadioButton)).assertIsEnabled()
+        compose.onNodeWithText(context.getString(R.string.comp_original, "1.0")).assertIsEnabled()
+        compose.onAllNodesWithText(context.getString(R.string.gpu_system_driver, "PowerVR"), substring = true).assertCountEquals(0)
+
+        compose.onNodeWithText(context.getString(R.string.comp_scope_general)).performClick()
+        compose.onNodeWithText("Game A").performClick()
+        compose.waitUntil(5_000) {
+            compose.onAllNodesWithText(context.getString(R.string.comp_game_reset)).fetchSemanticsNodes().isNotEmpty()
+        }
+        compose.onNodeWithText("Stored DXVK").assertIsEnabled()
+        compose.onNodeWithText(context.getString(R.string.cmgr_system_dxvk_managed, "Mali")).assertDoesNotExist()
+        compose.onAllNodesWithText(context.getString(R.string.gpu_system_driver, "PowerVR"), substring = true).assertCountEquals(0)
+    }
+
+    @Test @Config(qualifiers = "w1280dp-h1000dp")
+    fun systemXclipseNamesItsManagedDxvkWithoutPowerVrLabels() {
+        val context = RuntimeEnvironment.getApplication()
+        showDxvk(systemVulkan = true, systemDriverName = "Xclipse", runtimeManagedDxvk = true)
+        compose.onAllNodesWithText(context.getString(R.string.gpu_system_driver, "Xclipse"), substring = true)
+            .onLast().assertExists()
+        compose.onNodeWithText(context.getString(R.string.cmgr_system_dxvk_managed, "Xclipse")).assertExists()
+        compose.onNode(hasText("Stored DXVK") and SemanticsMatcher.expectValue(SemanticsProperties.Role, Role.RadioButton)).assertIsNotEnabled()
+        compose.onAllNodesWithText("PowerVR", substring = true).assertCountEquals(0)
+
+        compose.onNodeWithText(context.getString(R.string.comp_scope_general)).performClick()
+        compose.onNodeWithText("Game A").performClick()
+        compose.waitUntil(5_000) {
+            compose.onAllNodesWithText(context.getString(R.string.comp_game_reset)).fetchSemanticsNodes().isNotEmpty()
+        }
+        compose.onNodeWithText(context.getString(R.string.gpu_system_driver, "Xclipse")).assertIsNotEnabled()
+        compose.onNodeWithText(context.getString(R.string.cmgr_system_dxvk_managed, "Xclipse")).assertExists()
+        compose.onAllNodesWithText("PowerVR", substring = true).assertCountEquals(0)
     }
 
     private fun showDxvk(
-        systemPowerVr: Boolean,
+        systemVulkan: Boolean,
         gameDxvkOverride: Boolean = false,
+        systemDriverName: String = "PowerVR",
+        runtimeManagedDxvk: Boolean = systemVulkan,
         onCancel: () -> Unit = {},
         onImport: () -> Unit = {},
         onSwap: (String) -> Unit = {},
@@ -202,7 +249,8 @@ class ComponentsPageProfileTest {
                     onRefresh = {},
                     onImport = onImport,
                     onBack = {},
-                    gpu = GpuDriversState(powerVr = true, systemPowerVr = systemPowerVr),
+                    gpu = GpuDriversState(systemGpu = true, systemVulkan = systemVulkan,
+                        systemDriverName = systemDriverName, runtimeManagedDxvk = runtimeManagedDxvk),
                     games = listOf(Library.SteamGame(42, "Game A", null, "internal")),
                     requestInitialFocus = false,
                 )

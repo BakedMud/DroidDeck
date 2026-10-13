@@ -1693,8 +1693,7 @@ class MainActivity : ComponentActivity() {
             Thread({ checkCatalog() }, "catalog").start()
             return
         }
-        // The runtime draws with Turnip, an Adreno driver: on Mali, Xclipse or PowerVR the
-        // compositor gets no usable Vulkan device and a session is sound over a black screen.
+        // A GPU without Turnip or an available system Vulkan backend cannot display a session.
         // Said before the download, not after it; the user may still go ahead.
         if (installed == null && !com.droiddeck.launcher.core.DeviceSupport.graphicsAvailable()) { showNonAdreno = release; return }
         install(release)

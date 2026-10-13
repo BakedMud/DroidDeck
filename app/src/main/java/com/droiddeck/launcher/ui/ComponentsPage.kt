@@ -502,10 +502,10 @@ fun ComponentsPage(
                 val active = gpu.activePair
                 InUseBar(
                     queued = gpu.busy != null,
-                    sentence = (active?.let { "${it.name} ${it.version}" } ?: gpu.activeBundle ?: stringResource(if (gpu.systemPowerVr) R.string.gpu_system_powervr else R.string.gpu_builtin))
+                    sentence = (active?.let { "${it.name} ${it.version}" } ?: gpu.activeBundle ?: if (gpu.systemVulkan) stringResource(R.string.gpu_system_driver, gpu.systemDriverName) else stringResource(R.string.gpu_builtin))
                         .let { if (gpu.auto) stringResource(R.string.gpu_bar_auto, it) else it },
                     note = if (gpu.busy != null) (if (gpu.percent >= 0) "${gpu.percent}%" else "…")
-                        else if (gpu.systemPowerVr) stringResource(R.string.gpu_auto_system_hint)
+                        else if (gpu.systemVulkan) stringResource(R.string.gpu_auto_system_hint)
                         else gpu.autoStatus.ifEmpty { if (active != null || gpu.activeBundle != null) "" else gpu.pairs.firstOrNull { it.recommended }?.let { stringResource(R.string.gpu_recommended_for, it.name) } ?: stringResource(R.string.gpu_refresh_hint) },
                 )
             }
@@ -516,7 +516,7 @@ fun ComponentsPage(
             )
             else -> {
                 val st = compState(l)
-                val managedDxvk = ComponentsManager.runtimeManaged(l, gpu.systemPowerVr)
+                val managedDxvk = ComponentsManager.runtimeManaged(l, gpu.runtimeManagedDxvk)
                 val label = ComponentsManager.LABEL[l] ?: l
                 if (st == null) InUseBar(false, stringResource(R.string.comp_no_proton), "")
                 else {
@@ -524,7 +524,7 @@ fun ComponentsPage(
                     Column {
                         InUseBar(
                             queued = st.queued != null,
-                            sentence = (if (managedDxvk) stringResource(R.string.comp_in_use, label, stringResource(R.string.gpu_system_powervr)) +
+                            sentence = (if (managedDxvk) stringResource(R.string.comp_in_use, label, stringResource(R.string.gpu_system_driver, gpu.systemDriverName)) +
                                 (st.queued?.let { "\n" + stringResource(R.string.cmgr_powervr_dxvk_queued, it) } ?: "")
                                 else if (st.queued != null) stringResource(R.string.comp_next_queued, st.queued) else stringResource(R.string.comp_in_use, label, st.inUse))
                                 .let { if (reappliedAt != null && !managedDxvk) stringResource(R.string.comp_reapplied, it, reappliedAt) else it },
@@ -533,7 +533,7 @@ fun ComponentsPage(
                             maxLines = if (managedDxvk && st.queued != null) 3 else 2,
                         )
                         if (managedDxvk) Text(
-                            stringResource(R.string.cmgr_powervr_dxvk_managed),
+                            stringResource(R.string.cmgr_system_dxvk_managed, gpu.systemDriverName),
                             fontSize = 13.sp, color = colors.onSurfaceVariant, modifier = Modifier.padding(top = 8.dp),
                         )
                     }
@@ -563,11 +563,11 @@ fun ComponentsPage(
             GPU_TAB -> {
                 val autoKey = "gpu:auto"
                 ChoiceLine(
-                    stringResource(R.string.common_auto), stringResource(if (gpu.powerVr) R.string.gpu_auto_system_hint else R.string.gpu_auto_keeps), gpu.auto, removable = false,
+                    stringResource(R.string.common_auto), stringResource(if (gpu.systemGpu) R.string.gpu_auto_system_hint else R.string.gpu_auto_keeps), gpu.auto, removable = false,
                     modifier = Modifier.focusRequester(firstRow).trackRow(autoKey, rowsAt),
                     onSelect = {
                         if (gpu.auto) return@ChoiceLine
-                        ask(autoKey, right, ctx.getString(R.string.gpu_use_title, ctx.getString(R.string.common_auto)), ctx.getString(if (gpu.powerVr) R.string.gpu_auto_system_hint else R.string.gpu_auto_hint), ctx.getString(R.string.common_use), false, ctx.getString(R.string.common_auto)) {
+                        ask(autoKey, right, ctx.getString(R.string.gpu_use_title, ctx.getString(R.string.common_auto)), ctx.getString(if (gpu.systemGpu) R.string.gpu_auto_system_hint else R.string.gpu_auto_hint), ctx.getString(R.string.common_use), false, ctx.getString(R.string.common_auto)) {
                             gpuActions.onAuto(true); flyHome(autoKey, GPU_TAB)
                         }
                     },
@@ -612,7 +612,7 @@ fun ComponentsPage(
             }
             else -> {
                 val label = ComponentsManager.LABEL[l] ?: l
-                val managedDxvk = ComponentsManager.runtimeManaged(l, gpu.systemPowerVr)
+                val managedDxvk = ComponentsManager.runtimeManaged(l, gpu.runtimeManagedDxvk)
                 val rows = installedFor(l, view, snapshot, managedDxvk)
                 if (rows.isEmpty()) EmptyLine(stringResource(R.string.comp_nothing_stored, label))
                 val p = view?.proton
@@ -724,7 +724,7 @@ fun ComponentsPage(
                     }
                 }
                 else -> {
-                    val managedDxvk = ComponentsManager.runtimeManaged(l, gpu.systemPowerVr)
+                    val managedDxvk = ComponentsManager.runtimeManaged(l, gpu.runtimeManagedDxvk)
                     SmallButton(
                         stringResource(R.string.comp_import_wcp), onClick = onImport,
                         modifier = if (managedDxvk) Modifier.focusRequester(firstRow) else Modifier,
@@ -884,7 +884,8 @@ fun ComponentsPage(
                     protonChoice = gameProtonChoice,
                     packages = snapshot?.packages.orEmpty(),
                     componentChoices = gameComponents,
-                    systemPowerVr = gpu.systemPowerVr,
+                    runtimeManagedDxvk = gpu.runtimeManagedDxvk,
+                    systemDriverName = gpu.systemDriverName,
                     componentMenu = gameComponentMenu,
                     protonMenu = gameProtonMenu,
                     fexMenu = fexMenu,
@@ -1080,12 +1081,12 @@ private fun Stack(
         LayerCard(
             title = LayerTitle(l),
             value = when (l) {
-                GPU_TAB -> if (gpu.systemPowerVr) stringResource(R.string.gpu_system_powervr) else if (gpu.auto) auto else gpu.activePair?.name ?: gpu.activeBundle ?: auto
+                GPU_TAB -> if (gpu.systemVulkan) stringResource(R.string.gpu_system_driver, gpu.systemDriverName) else if (gpu.auto) auto else gpu.activePair?.name ?: gpu.activeBundle ?: auto
                 PROTON_TAB -> (view?.proton?.name ?: "") + " ▾"
-                else -> if (ComponentsManager.runtimeManaged(l, gpu.systemPowerVr)) stringResource(R.string.gpu_system_powervr)
+                else -> if (ComponentsManager.runtimeManaged(l, gpu.runtimeManagedDxvk)) stringResource(R.string.gpu_system_driver, gpu.systemDriverName)
                     else st?.let { if (it.activeFile == null) original else it.inUse } ?: ""
             },
-            swapped = l in ComponentsManager.COMPONENTS && st?.activeFile != null && !ComponentsManager.runtimeManaged(l, gpu.systemPowerVr),
+            swapped = l in ComponentsManager.COMPONENTS && st?.activeFile != null && !ComponentsManager.runtimeManaged(l, gpu.runtimeManagedDxvk),
             selected = l == layer,
             landed = landed[l] ?: 0, ring = rings[l] ?: 0,
             modifier = Modifier.focusRequester(focus.getValue(l)).onGloballyPositioned { onPlaced(l, it.boundsInRoot()) },
@@ -1201,7 +1202,8 @@ private fun GameComponentOverrides(
     protonChoice: ProtonDefault.GameChoice?,
     packages: List<ComponentsManager.Package>,
     componentChoices: Map<String, String>,
-    systemPowerVr: Boolean,
+    runtimeManagedDxvk: Boolean,
+    systemDriverName: String,
     componentMenu: String?,
     protonMenu: Boolean,
     fexMenu: Boolean,
@@ -1293,7 +1295,8 @@ private fun GameComponentOverrides(
             }
             GamePackageRow(
                 comp = "dxvk",
-                runtimeManaged = ComponentsManager.runtimeManaged("dxvk", systemPowerVr),
+                runtimeManaged = ComponentsManager.runtimeManaged("dxvk", runtimeManagedDxvk),
+                systemDriverName = systemDriverName,
                 packages = packages,
                 selectedFile = componentChoices["dxvk"],
                 open = componentMenu == "dxvk",
@@ -1359,6 +1362,7 @@ private fun GamePackageRow(
     onPick: (String, String?) -> Unit,
     onRuntimeOptions: (() -> Unit)? = null,
     runtimeManaged: Boolean = false,
+    systemDriverName: String = "",
 ) {
     val choices = packages.filter { it.comp == comp }
     val selected = choices.firstOrNull { it.file == selectedFile }
@@ -1366,7 +1370,7 @@ private fun GamePackageRow(
     val enabled = !busy && (!runtimeManaged || selectedFile != null)
     SettingsRow(
         title,
-        if (runtimeManaged) stringResource(R.string.cmgr_powervr_dxvk_managed)
+        if (runtimeManaged) stringResource(R.string.cmgr_system_dxvk_managed, systemDriverName)
         else if (selected == null) {
             if (proton == null) stringResource(R.string.comp_game_component_general)
             else stringResource(R.string.comp_game_component_runtime, proton.name)
@@ -1375,7 +1379,7 @@ private fun GamePackageRow(
         Row(horizontalArrangement = Arrangement.spacedBy(8.dp), verticalAlignment = Alignment.CenterVertically) {
             Box {
                 ValueChip(
-                    if (runtimeManaged) stringResource(R.string.gpu_system_powervr) else selected?.version ?: stringResource(R.string.comp_game_use_general),
+                    if (runtimeManaged) stringResource(R.string.gpu_system_driver, systemDriverName) else selected?.version ?: stringResource(R.string.comp_game_use_general),
                     open && enabled,
                     enabled = enabled,
                     modifier = Modifier.widthIn(max = 240.dp),
