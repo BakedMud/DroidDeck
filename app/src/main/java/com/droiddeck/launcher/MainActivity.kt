@@ -600,11 +600,6 @@ class MainActivity : ComponentActivity() {
                     ),
                     FrontEndActions(
                         onPlay = { startSteamSession() },
-                        onManageSteamAccount = {
-                            startSession(Intent(this, SessionActivity::class.java)
-                                .putExtra(SessionService.EXTRA_STEAM_UI, "desktop")
-                                .putExtra(SessionService.EXTRA_STEAM_URL, "steam://open/settings"), steamSession = true)
-                        },
                         // The client's desktop UI, with gamescope's Deck integration disabled.
                         onPlayDesktopUi = {
                             startSession(Intent(this, SessionActivity::class.java)

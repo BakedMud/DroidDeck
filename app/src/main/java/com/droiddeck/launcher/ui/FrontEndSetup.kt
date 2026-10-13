@@ -296,10 +296,7 @@ internal fun SetupPanel(
                                     }
                                 } ?: stringResource(R.string.setup_sign_in),
                                 divider = divider,
-                            ) {
-                                SecondaryButton(stringResource(R.string.setup_manage_account), enabled = runtimeOk && !s.sessionRunning,
-                                    compact = true, onClick = a.onManageSteamAccount)
-                            }
+                            )
                         }
                         val all = listOf(gpuCheck, runtimeCheck, limitCheck, accountCheck)
                         // Everything passes: one line says so, and Details opens the checks in place.
