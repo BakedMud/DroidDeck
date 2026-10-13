@@ -35,6 +35,7 @@ def recipe_inputs(root):
     paths = [root / "tools/dxvk" / name for name in
              ("build_xclipse.sh", "xclipse_component_record.py", "xclipse-source.env")]
     paths.extend(sorted((root / "tools/dxvk/xclipse-patches").glob("*.patch")))
+    paths.append(root / "tools/tests/dxvk_xclipse_toolchain_test.cpp")
     return {str(path.relative_to(root)): sha256(path.read_bytes()) for path in paths}
 
 

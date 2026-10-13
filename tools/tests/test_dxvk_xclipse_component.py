@@ -32,6 +32,9 @@ class DxvkXclipseComponentTest(unittest.TestCase):
         (dxvk / "build_xclipse.sh").write_text("build recipe\n")
         (dxvk / "xclipse_component_record.py").write_text("record recipe\n")
         (patches / "0001-check-direct3d-bc-formats.patch").write_text("patch recipe\n")
+        tests = self.root / "tools/tests"
+        tests.mkdir()
+        (tests / "dxvk_xclipse_toolchain_test.cpp").write_text("toolchain probe\n")
         self.prefix = "dxvk-2.6.2"
         self.entries = {}
         for architecture, (machine, magic) in component.ARCHITECTURES.items():

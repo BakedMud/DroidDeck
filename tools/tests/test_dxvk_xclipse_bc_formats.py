@@ -10,6 +10,7 @@ import unittest
 ROOT = Path(__file__).resolve().parents[2]
 PATCH = ROOT / "tools/dxvk/xclipse-patches/0001-check-direct3d-bc-formats.patch"
 FIXTURE = Path(__file__).with_name("dxvk_xclipse_bc_formats_test.cpp")
+TOOLCHAIN_FIXTURE = Path(__file__).with_name("dxvk_xclipse_toolchain_test.cpp")
 
 
 def added_file(patch, name):
@@ -87,10 +88,27 @@ class DxvkXclipseBcFormatsTest(unittest.TestCase):
     def test_pinned_legacy_source_has_modern_toolchain_includes_and_official_tag(self):
         config = file_diff(PATCH, "src/util/config/config.cpp")
         self.assertIn("+#include <algorithm>", config)
+        pipeline = file_diff(PATCH, "src/dxvk/dxvk_pipemanager.cpp")
+        self.assertIn("-      std::tuple(),", pipeline)
+        self.assertIn("+      std::tuple(key),", pipeline)
+        self.assertEqual(PATCH.read_text().count("-      std::tuple(),"), 1)
         build = (ROOT / "tools/dxvk/build_xclipse.sh").read_text()
         self.assertIn("refs/tags/v$DXVK_XCLIPSE_VERSION:refs/tags/v$DXVK_XCLIPSE_VERSION", build)
         self.assertIn("DXVK_XCLIPSE_TAG_OBJECT", build)
         self.assertNotIn('git -C "$source" tag ', build)
+
+    def test_legacy_source_patterns_compile_with_the_host_standard_library(self):
+        compiler = shutil.which(os.environ.get("CXX", "c++"))
+        self.assertIsNotNone(compiler, "a C++ compiler is required")
+        with tempfile.TemporaryDirectory(prefix="droiddeck-dxvk-toolchain-") as directory:
+            program = Path(directory) / "toolchain-test"
+            built = subprocess.run([
+                compiler, "-std=c++17", "-Wall", "-Wextra", "-Werror",
+                str(TOOLCHAIN_FIXTURE), "-o", str(program),
+            ], capture_output=True, text=True)
+            self.assertEqual(built.returncode, 0, built.stdout + built.stderr)
+            ran = subprocess.run([str(program)], capture_output=True, text=True, timeout=30)
+            self.assertEqual(ran.returncode, 0, ran.stdout + ran.stderr)
 
 
 if __name__ == "__main__":

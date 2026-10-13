@@ -69,6 +69,18 @@ build_architecture() {
   chmod 0755 "$payload/$layout"/*.dll
 }
 
+verify_toolchain_compatibility() {
+  local triplet compiler object
+  for triplet in i686-w64-mingw32 x86_64-w64-mingw32; do
+    compiler="$toolchain/${triplet}-clang++"
+    test -x "$compiler" || die "missing pinned Xclipse compiler: $compiler"
+    object="$work/toolchain-compat-$triplet.obj"
+    "$compiler" -std=c++17 -Wall -Wextra -Werror -c \
+      "$root/tools/tests/dxvk_xclipse_toolchain_test.cpp" -o "$object"
+    test -s "$object" || die "empty toolchain compatibility object: $object"
+  done
+}
+
 record_pe_inventory() {
   python3 - "$payload" "$toolchain/llvm-objdump" <<'PY'
 from pathlib import Path
@@ -190,6 +202,7 @@ inside_container() {
   DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends \
     ca-certificates curl git gzip meson ninja-build glslang-tools pkg-config python3 xz-utils zstd
   install_toolchain
+  verify_toolchain_compatibility
   {
     printf 'llvm-mingw-release %s\n' "$DXVK_XCLIPSE_LLVM_MINGW_VERSION"
     printf 'llvm-mingw-archive-sha256 %s\n' "$DXVK_XCLIPSE_LLVM_MINGW_SHA256"

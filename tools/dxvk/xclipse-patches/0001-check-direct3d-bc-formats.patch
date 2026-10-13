@@ -61,6 +61,17 @@ index 192ead6..ff9d58e 100644
      try {
        auto dxvkDevice = dxvkAdapter->createDevice(m_instance, D3D9DeviceEx::GetDeviceFeatures(dxvkAdapter));
  
+diff --git a/src/dxvk/dxvk_pipemanager.cpp b/src/dxvk/dxvk_pipemanager.cpp
+--- a/src/dxvk/dxvk_pipemanager.cpp
++++ b/src/dxvk/dxvk_pipemanager.cpp
+@@ -444,6 +444,6 @@ namespace dxvk {
+     auto iter = m_shaderLibraries.emplace(
+       std::piecewise_construct,
+-      std::tuple(),
++      std::tuple(key),
+       std::tuple(m_device, this, key, layout));
+     return &iter.first->second;
+   }
 diff --git a/src/dxvk/dxvk_adapter.cpp b/src/dxvk/dxvk_adapter.cpp
 index f9dbae1..c222ca7 100644
 --- a/src/dxvk/dxvk_adapter.cpp
