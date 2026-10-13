@@ -117,7 +117,7 @@ Historical installed-APK evidence goes beyond the Termux probe. The
 [full APK build at `b35888b`](https://github.com/wallentx/DroidDeck/actions/runs/38304474692)
 passed CI. On the Pixel 8 Pro, the installed 0.3.2 APK's native ARM64 Steam client
 reached `READY` using shared-memory presentation, and Old School Rally downloaded
-successfully. Game rendering remains unverified on that Mali build.
+successfully.
 
 The stock `DXVK 3.1.1-27-g25ca` payload still cannot create an adapter because
 Mali lacks required `fillModeNonSolid` support, alongside the other capability
@@ -125,17 +125,34 @@ gates above. The tested Old School Rally build produced white or black output
 with the WineD3D fallbacks and rejected `-force-vulkan` because Vulkan support was
 not built into the game. Managed DXVK and WineD3D choices remain user-controlled.
 
-The newer shared experimental Mali DXVK source at
-[`48fdc1a`](https://github.com/wallentx/DroidDeck/commit/48fdc1a) contains the
-three-architecture native wrapper and a separate
-[component build](https://github.com/wallentx/DroidDeck/actions/runs/38361775286).
-The new component has not received installed-device validation. The successful
-[PowerVR/Xclipse APK build](https://github.com/wallentx/DroidDeck/actions/runs/38357695607?pr=7)
-covers base revision `500451b`; it does not validate the newer Mali component.
+The experimental Mali component at
+[`15dc6cbbc891e8633738ca1a822cf96403741b79`](https://github.com/wallentx/DroidDeck/commit/15dc6cbbc891e8633738ca1a822cf96403741b79)
+passed [component CI 38376448398](https://github.com/wallentx/DroidDeck/actions/runs/38376448398).
+Artifact checksums and provenance passed review, along with all 30 PE headers
+and the 10 ARM64X hybrids. All 15 baseline DLLs are byte-identical to the tested
+`b3e3322b` component. Wine truncates Mali ID `0xb8a20000` to `0`, so the guard
+accepts `0` only for the exact `Mali-G715` name, vendor `0x13b5`, driver
+`0x0d803000`, and `DXVK_MALI_COMPAT=1`.
 
-Focused JVM tests use stubbed Android dependencies; guest tests validate
-environment and command selection. Full Android/Compose CI and installed-device
-validation of the exact component artifact remain required.
+On a Pixel 8 Pro with Mali-G715 54.3.0, the installed `b35888b` 0.3.2 APK was
+manually staged with the `15dc` component. A stock control with four exact DLL
+hashes and fresh logs still rejected `fillModeNonSolid`. The experimental run
+had four prefix DLL hashes matching CI. Its logs confirmed the enabled profile,
+a D3D11 feature-level 11_0 device, a 1602x720 swapchain, and the same unsupported
+Vulkan feature bits at `0`. It reached the animated intro, interactive menus,
+and the Time Trial Arizona SS1 Taurus RS race scene, including brief acceleration.
+This is a bounded test;
+it does not establish a full race, long-run stability, broad compatibility,
+robustness2 conformance, or coverage of every rejection guard.
+
+`dxvk-mali` is a manual `workflow_dispatch` component artifact. It is not bundled,
+pinned, or automatically selected by the normal APK. The Mali profile keeps
+`dxvkPayload=null`, `DXVK=user`, and `x11-shm`; external staging merges the
+experimental `run-proton.py` and `dxvk-mali` alongside the current runtime `lib/`
+and `wsi/`, then requires explicit managed selection with `DXVK_MALI_COMPAT=1`.
+Focused JVM tests still use stubbed Android dependencies, while guest tests cover
+environment and command selection. Device validation used the separately staged
+component with the historical APK specified above.
 
 ## Related implementation discussion
 
