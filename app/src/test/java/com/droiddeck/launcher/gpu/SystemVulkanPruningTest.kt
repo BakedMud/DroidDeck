@@ -5,6 +5,7 @@ import java.nio.file.Files
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertTrue
+import org.junit.Assert.fail
 import org.junit.Rule
 import org.junit.Test
 import org.junit.rules.TemporaryFolder
@@ -98,6 +99,68 @@ class SystemVulkanPruningTest {
         Files.createSymbolicLink(alias.toPath(), base.toPath())
         SystemVulkanDriver.pruneUnused(File(alias, current.name), true)
         assertTrue(old.isDirectory)
+    }
+
+    @Test fun interruptedCurrentRuntimeIsQuarantinedWithoutTouchingOtherEntries() {
+        val base = temporary.newFolder("system_vulkan")
+        val current = File(base, "a".repeat(64)).apply {
+            mkdir()
+            File(this, "partial").writeText("partial")
+        }
+        val old = completeRuntime(base, "b".repeat(64))
+        val unrelated = File(base, "notes").apply { mkdir(); File(this, "keep").writeText("keep") }
+
+        val quarantined = SystemVulkanDriver.quarantineIncompleteTarget(current, true)
+
+        assertFalse(current.exists())
+        assertTrue(quarantined!!.name.startsWith(".stage-"))
+        assertEquals("partial", File(quarantined, "partial").readText())
+        assertEquals("current ICD", File(old, "icd.json").readText())
+        assertEquals("keep", File(unrelated, "keep").readText())
+    }
+
+    @Test fun survivingGuestKeepsInterruptedCurrentRuntimeInPlace() {
+        val base = temporary.newFolder("system_vulkan")
+        val current = File(base, "a".repeat(64)).apply { mkdir(); File(this, "partial").writeText("partial") }
+
+        try {
+            SystemVulkanDriver.quarantineIncompleteTarget(current, false)
+            fail("active guests must prevent replacement")
+        } catch (expected: java.io.IOException) {
+            assertTrue(expected.message!!.contains("still in use"))
+        }
+        assertEquals("partial", File(current, "partial").readText())
+        assertEquals(listOf(current.name), base.list()!!.toList())
+    }
+
+    @Test fun recoveryRejectsSymlinksAndUnmanagedLocations() {
+        val base = temporary.newFolder("target-link-parent", "system_vulkan")
+        val incomplete = temporary.newFolder("incomplete")
+        val linkedCurrent = File(base, "a".repeat(64))
+        Files.createSymbolicLink(linkedCurrent.toPath(), incomplete.toPath())
+        assertRecoveryRejected(linkedCurrent)
+        assertTrue(incomplete.isDirectory)
+
+        val realBase = temporary.newFolder("real-system-vulkan")
+        val linkedBase = File(temporary.newFolder("base-link-parent"), "system_vulkan")
+        Files.createSymbolicLink(linkedBase.toPath(), realBase.toPath())
+        val throughLinkedBase = File(linkedBase, "b".repeat(64)).apply { mkdir() }
+        assertRecoveryRejected(throughLinkedBase)
+        assertTrue(throughLinkedBase.isDirectory)
+
+        val unrelatedBase = temporary.newFolder("unrelated")
+        val unrelated = File(unrelatedBase, "c".repeat(64)).apply { mkdir(); File(this, "keep").writeText("keep") }
+        assertRecoveryRejected(unrelated)
+        assertEquals("keep", File(unrelated, "keep").readText())
+    }
+
+    private fun assertRecoveryRejected(target: File) {
+        try {
+            SystemVulkanDriver.quarantineIncompleteTarget(target, true)
+            fail("unsafe path must be rejected: $target")
+        } catch (expected: java.io.IOException) {
+            assertTrue(expected.message!!.contains("Unsafe"))
+        }
     }
 
     private fun abandonedStage(base: File) =

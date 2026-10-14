@@ -13,6 +13,7 @@ import java.io.BufferedReader;
 import java.io.InputStreamReader;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
+import java.nio.file.Path;
 import java.util.List;
 import java.util.TreeSet;
 import java.util.UUID;
@@ -206,14 +207,26 @@ public final class SystemVulkanDriver {
 
     /** APK-versioned directories stay intact while an older session still has libraries mapped. */
     public static synchronized File prepare(Context context) throws IOException {
+        return prepare(context, false);
+    }
+
+    /**
+     * Prepare the current runtime, replacing an interrupted current-version install only after
+     * the session layer has established that no app-owned guest can still have it mapped.
+     */
+    public static synchronized File prepare(Context context, boolean guestsStopped) throws IOException {
         Profile selected = profile();
         if (selected == null) throw new IOException("System Vulkan driver is unavailable");
         if (selected.requiresRenderNode && !renderNodeAvailable()) throw new IOException(
                 "System " + selected.gpuName + " requires an identifiable, readable and writable DRM render node");
         File target = runtimeDirectory(context);
         File base = target.getParentFile();
+        if (!managedRuntimePath(target) || Files.isSymbolicLink(base.toPath())
+                || Files.isSymbolicLink(target.toPath()))
+            throw new IOException("Unsafe system Vulkan runtime path");
         if (complete(target)) return target;
         if (!base.isDirectory() && !base.mkdirs()) throw new IOException("Cannot create system Vulkan directory");
+        File quarantined = quarantineIncompleteTarget(target, guestsStopped);
         File staged = new File(base, ".stage-" + UUID.randomUUID());
         try {
             if (!TarZst.extractAsset(context, ASSET, staged)) throw new IOException("Cannot unpack system Vulkan runtime");
@@ -230,12 +243,29 @@ public final class SystemVulkanDriver {
             Files.write(new File(staged, "icd.json").toPath(), manifest.toString().getBytes(StandardCharsets.UTF_8));
             if (target.exists()) throw new IOException("Incomplete system Vulkan runtime directory: " + target.getName());
             if (!staged.renameTo(target)) throw new IOException("Cannot publish system Vulkan runtime");
+            if (quarantined != null) FileUtils.delete(quarantined);
             return target;
         } catch (org.json.JSONException error) {
             throw new IOException("Cannot write system Vulkan manifest", error);
         } finally {
             if (staged.exists()) FileUtils.delete(staged);
         }
+    }
+
+    /** Atomically move an interrupted managed install aside without traversing its contents. */
+    static File quarantineIncompleteTarget(File target, boolean guestsStopped) throws IOException {
+        File base = target.getParentFile();
+        if (!managedRuntimePath(target) || Files.isSymbolicLink(base.toPath())
+                || Files.isSymbolicLink(target.toPath()))
+            throw new IOException("Unsafe system Vulkan runtime path");
+        if (!target.exists()) return null;
+        if (complete(target)) return null;
+        if (!guestsStopped)
+            throw new IOException("Incomplete system Vulkan runtime is still in use: " + target.getName());
+        File quarantined = new File(base, ".stage-" + UUID.randomUUID());
+        if (!target.renameTo(quarantined))
+            throw new IOException("Cannot quarantine incomplete system Vulkan runtime: " + target.getName());
+        return quarantined;
     }
 
     /** The current APK's versioned runtime path, without extracting or modifying it. */
@@ -256,7 +286,8 @@ public final class SystemVulkanDriver {
 
     static synchronized void pruneUnused(File current, boolean guestsStopped) {
         File base = current.getParentFile();
-        if (base == null || Files.isSymbolicLink(base.toPath()) || Files.isSymbolicLink(current.toPath())) return;
+        if (!managedRuntimePath(current) || Files.isSymbolicLink(base.toPath())
+                || Files.isSymbolicLink(current.toPath())) return;
         File[] entries = base.listFiles();
         if (entries == null) return;
         // Retain the previous good version if publishing the replacement failed.
@@ -269,6 +300,15 @@ public final class SystemVulkanDriver {
             // The prepare monitor excludes any extraction still writing a .stage directory.
             if (oldVersion || abandonedStage) FileUtils.delete(entry);
         }
+    }
+
+    private static boolean managedRuntimePath(File current) {
+        File base = current.getParentFile();
+        if (base == null || !"system_vulkan".equals(base.getName())
+                || !current.getName().matches("[0-9a-f]{64}")) return false;
+        Path basePath = base.toPath().toAbsolutePath().normalize();
+        Path currentPath = current.toPath().toAbsolutePath().normalize();
+        return basePath.equals(currentPath.getParent());
     }
 
     private static boolean complete(File directory) {

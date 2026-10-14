@@ -295,6 +295,27 @@ class WinCompSourcesTest {
         assertEquals(2, AutoComponents.cachedFindings(app, "400")!!.count { it.auto })
     }
 
+    @Test fun anUnavailableCatalogPreservesExistingComponentSelections() = withFakeWorker {
+        val game = payback()
+        val key = "1262580"
+        val cache = File(tmp.root, "unavailable-catalog.json")
+        WinComponents.setAuto(app, key, mapOf(
+            "d3dx9" to WinComponents.AutoReason("STEAM", listOf("DirectX")),
+            "trebuchet" to WinComponents.AutoReason("KNOWN_GAME", listOf("Fonts")),
+        ))
+        WinComponents.setUser(app, key, "vcredist2019_dll", false)
+        val before = WinComponents.selection(app, key)
+        AutoComponents.catalogOf = { _, _ -> WinComponents.loadCatalog(null, cache) }
+        for (body in listOf(null, "invalid catalog")) {
+            body?.let { cache.writeText(it) }
+            AutoComponents.queueGame(app, game, asked = false)
+            val after = WinComponents.selection(app, key)
+            assertEquals(before.auto, after.auto)
+            assertEquals(before.user, after.user)
+            assertTrue(downloaded.isEmpty())
+        }
+    }
+
     @Test fun theQueueWaitsWhileASessionRunsAndResumesAfter() = withFakeWorker {
         val game = payback()
         session = true

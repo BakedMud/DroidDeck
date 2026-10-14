@@ -294,7 +294,7 @@ class SessionService : Service() {
         killStragglers()
         try {
             if (SystemVulkanDriver.usesDefault(SessionPrefs.linuxDriver(this))) {
-                SystemVulkanDriver.prepare(this)
+                SystemVulkanDriver.prepare(this, !OrphanReaper.hasOtherProcesses())
                 pruneSystemVulkanRuntime()
             }
             SessionFiles.stage(this, root)
@@ -320,7 +320,13 @@ class SessionService : Service() {
                 .onSuccess { if (it != null) Log.i(TAG, it) }
                 .onFailure { Log.w(TAG, "forced components", it) }
         }
-        addClientEnvironment(guest, steamHere)
+        try {
+            addClientEnvironment(guest, steamHere)
+        } catch (error: IllegalStateException) {
+            Log.e(TAG, "Could not configure the session graphics driver", error)
+            stopSession(-1)
+            return
+        }
         val fastPathAt = guest.size
 
         val pulse = startAudio(guest, sessionDir)

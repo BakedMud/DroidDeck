@@ -563,8 +563,9 @@ def _vkjson_view(device):
     unsupported = []
     _base_features(device["features"], features, coverage["features"], unsupported, "features")
     identity = _base_properties(device["properties"], properties, limits, coverage, unsupported, "properties")
-    _collect_structs(device, "Features", features, coverage["features"], unsupported)
-    _collect_structs(device, "Properties", properties, coverage["properties"], unsupported)
+    extended = {key: value for key, value in device.items() if key not in {"features", "properties"}}
+    _collect_structs(extended, "Features", features, coverage["features"], unsupported)
+    _collect_structs(extended, "Properties", properties, coverage["properties"], unsupported)
     _core_blocks(device, features, properties, coverage, unsupported)
     formats, format_unsupported, format_coverage = _formats(device["formats"])
     unsupported.extend(format_unsupported)
@@ -714,7 +715,7 @@ def _default_owner(_mode, _transition):
 def _covered(view, group, key):
     coverage = set(view.get("coverage", {}).get(group, []))
     if group == "formats" and "base:*" in coverage:
-        if key.rsplit(".", 1)[-1] in STRUCT_MEMBERS["VkFormatProperties"]:
+        if key.count(".") == 2 and key.rsplit(".", 1)[-1] in STRUCT_MEMBERS["VkFormatProperties"]:
             return True
     return "*" in coverage or key in coverage
 

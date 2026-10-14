@@ -86,20 +86,27 @@ object WinComponents {
 
     private val SNAPSHOT_COVERS = INSTALLER_STEPS + setOf("download_archive", "archive_extract", "copy_dll", "copy_file") + OFFLINE_STEPS
 
-    fun fetch(): List<Component>? = Downloader.downloadString(CATALOG_URL)?.let { parse(it) } ?: WinFontComponents.components()
+    fun fetch(): List<Component>? = loadCatalog(Downloader.downloadString(CATALOG_URL))
 
     private const val CATALOG_CACHE = "wincomponents-catalog.json"
 
-    fun fetch(context: Context): List<Component>? {
-        val cache = File(context.filesDir, CATALOG_CACHE)
-        Downloader.downloadString(CATALOG_URL)?.let { body ->
-            parse(body)?.let { runCatching { write(cache, body) }; return it }
+    fun fetch(context: Context): List<Component>? =
+        loadCatalog(Downloader.downloadString(CATALOG_URL), File(context.filesDir, CATALOG_CACHE))
+
+    internal fun loadCatalog(downloaded: String?, cache: File? = null): List<Component>? {
+        downloaded?.let { body ->
+            parse(body)?.let { components ->
+                cache?.let { runCatching { write(it, body) } }
+                return components
+            }
         }
-        return runCatching { parse(cache.readText()) }.getOrNull() ?: WinFontComponents.components()
+        // A font-only list is not a full catalog: reconciliation would remove
+        // existing automatic picks for components absent from that partial list.
+        return cache?.let { runCatching { parse(it.readText()) }.getOrNull() }
     }
 
     fun cached(context: Context): List<Component>? =
-        runCatching { parse(File(context.filesDir, CATALOG_CACHE).readText()) }.getOrNull()
+        loadCatalog(null, File(context.filesDir, CATALOG_CACHE))
 
     private fun parse(body: String): List<Component>? {
         return try {

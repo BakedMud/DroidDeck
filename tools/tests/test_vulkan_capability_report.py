@@ -125,7 +125,7 @@ class VulkanCapabilityReportTest(unittest.TestCase):
         self.assertEqual(summaries["glibc-bare->glibc-compat"]["unexpected_by_group"], {
             "extensions": 6, "features": 2, "formats": 15, "limits": 2, "properties": 1})
         self.assertEqual([summaries[mode]["coverage_unknown_group_count"] for mode in report.MODES],
-                         [29, 13, 41])
+                         [28, 13, 40])
         self.assertFalse(result["differences_ok"])
         self.assertFalse(result["coverage_complete"])
         self.assertFalse(result["ok"])
@@ -173,6 +173,33 @@ class VulkanCapabilityReportTest(unittest.TestCase):
         result = report.compare_views(native, bare, copy.deepcopy(bare))
         self.assertFalse(any(change["path"].startswith("formats.format.VK_FORMAT_R8_UNORM")
                              for change in result["comparisons"]["native-android->glibc-bare"]["unexpected"]))
+
+    def test_sparse_properties_have_one_equivalent_path_across_producers(self):
+        native_capture, profile_capture = vkjson(), profiles()
+        sparse = {"residencyStandard2DBlockShape": True, "residencyNonResidentStrict": False}
+        native_capture["devices"][0]["properties"]["sparseProperties"] = sparse
+        profile_capture["capabilities"]["device"]["properties"]["VkPhysicalDeviceProperties"]["sparseProperties"] = sparse
+        native, bare = report.normalize_view(native_capture), report.normalize_view(profile_capture)
+        self.assertTrue(report.compare_views(native, bare, copy.deepcopy(bare))["ok"])
+        self.assertFalse(any(path.startswith("sparseProperties.") for path in native["coverage"]["properties"]))
+
+    def test_missing_extended_format_capture_is_unknown_in_both_directions(self):
+        capture = profiles()
+        capture["capabilities"]["device"]["formats"]["VK_FORMAT_ASTC_4x4_SFLOAT_BLOCK_EXT"]["VkFormatProperties3"] = {
+            "optimalTilingFeatures": ["VK_FORMAT_FEATURE_2_SAMPLED_IMAGE_BIT"],
+        }
+        base, extended = report.normalize_view(vkjson()), report.normalize_view(capture)
+        for source, target in ((base, extended), (extended, base)):
+            with self.subTest(source_has_extended=source is extended):
+                result = report.compare_views(source, target, copy.deepcopy(target))
+                comparison = result["comparisons"]["native-android->glibc-bare"]
+                self.assertEqual(comparison["unexpected"], [])
+                self.assertEqual([item["path"] for item in comparison["coverage_unknown"]], [
+                    "formats.format.VK_FORMAT_ASTC_4x4_SFLOAT_BLOCK.formatProperties3.optimalTilingFeatures",
+                ])
+                self.assertTrue(result["differences_ok"])
+                self.assertFalse(result["coverage_complete"])
+                self.assertFalse(result["ok"])
 
     def test_one_semantic_change_produces_exactly_one_known_difference(self):
         native = report.normalize_view(vkjson())

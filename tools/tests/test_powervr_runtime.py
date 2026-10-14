@@ -168,7 +168,10 @@ class PowerVRRuntimeTest(unittest.TestCase):
         self.assertIn('dxvk/x64/d3d9.dll', entries)
 
     def add_mali_payload(self, plain_arm64=False, missing=None):
-        from tools.tests.test_proton_wrapper import pe_fixture, plain_arm64_fixture
+        if __package__:
+            from .test_proton_wrapper import pe_fixture, plain_arm64_fixture
+        else:
+            from test_proton_wrapper import pe_fixture, plain_arm64_fixture
         (self.root / "tools/hybris/run-proton.py").write_bytes((runtime.ROOT / "tools/hybris/run-proton.py").read_bytes())
         files = {}
         for arch, machine in (("i386-windows", 0x14c), ("x86_64-windows", 0x8664), ("aarch64-windows", 0xaa64)):

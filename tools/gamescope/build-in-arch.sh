@@ -46,9 +46,7 @@ cd "$WORK"
 g++ -std=c++17 -Wall -Wextra -Werror -UNDEBUG -I pkg/arch/src/gamescope/src \
   tools/gamescope/tests/nested-swapchain.cpp -o pkg/test-nested-swapchain
 pkg/test-nested-swapchain
-g++ -std=c++17 -Wall -Wextra -Werror -UNDEBUG -I pkg/arch/src/gamescope/src \
-  tools/gamescope/tests/shm-commit-sync.cpp -o pkg/test-shm-commit-sync
-pkg/test-shm-commit-sync
+python3 tools/gamescope/tests/shm-commit-sync-regression.py pkg/arch/src/gamescope/src
 python3 tools/gamescope/tests/shm-buffer-memoizer-regression.py \
   pkg/arch/src/gamescope/src/steamcompmgr.cpp
 rm -rf out && mkdir -p out/usr/local/bin

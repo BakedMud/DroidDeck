@@ -3,6 +3,8 @@
 #include <cassert>
 #include <cstdio>
 #include <optional>
+#include <memory>
+#include <vector>
 
 struct DoneCommits {};
 
@@ -24,6 +26,7 @@ struct MockCommit
 	}
 
 	int setFenceCalls = 0;
+	unsigned long commitID = 1;
 	int signalCalls = 0;
 	int fence = -2;
 	bool mangoNudge = false;
@@ -142,13 +145,69 @@ static void TestFailedWaitRegistrationDoesNotSignal()
 	MockCommit commit;
 	MockWaiter waiter;
 	waiter.addResult = false;
-	const gamescope::BufferCommitSync sync = gamescope::BufferCommitSync::DmaBuf( -1 );
+	const gamescope::BufferCommitSync sync = gamescope::BufferCommitSync::DmaBuf( 21 );
 
 	assert( !gamescope::DispatchBufferCommitSync( &commit, waiter, sync, false, 0, &doneCommits ) );
-	assert( commit.fence == -1 );
+	assert( commit.fence == 21 );
 	assert( commit.signalCalls == 0 );
 	assert( waiter.addCalls == 1 );
 }
+
+static void TestFailedDmaBufDupDoesNotWaitOrSignal()
+{
+	DoneCommits done;
+	MockCommit commit;
+	MockWaiter waiter;
+	const auto sync = gamescope::SelectBufferCommitSync(
+		false, -1, false, []() { return std::optional<int>( -1 ); } );
+	assert( sync.source == gamescope::BufferCommitSyncSource::DmaBuf );
+	assert( !gamescope::DispatchBufferCommitSync( &commit, waiter, sync, false, 0, &done ) );
+	assert( commit.signalCalls == 0 );
+	assert( waiter.addCalls == 0 );
+}
+
+#ifdef DROIDDECK_PRODUCTION_QUEUE_BLOCK
+struct MockWindow
+{
+	std::vector<std::shared_ptr<MockCommit>> commit_queue;
+	bool receivedDoneCommit = false;
+};
+struct MockLog { template<typename... Args> void errorf( const char *, Args... ) {} };
+
+static void QueueProductionCommit( MockWindow *w, std::shared_ptr<MockCommit> newCommit,
+	MockWaiter &g_ImageWaiter, const gamescope::BufferCommitSync &commitSync )
+{
+	MockLog xwm_log;
+	DoneCommits done;
+	DoneCommits *doneCommits = &done;
+	bool mango_nudge = false;
+	unsigned int uMangoMsgType = 0;
+#include DROIDDECK_PRODUCTION_QUEUE_BLOCK
+}
+
+static void TestProductionCallerDropsUnwaitableCommits()
+{
+	for ( int fd : { -1, 21 } )
+	{
+		MockWindow window;
+		MockWaiter waiter;
+		waiter.addResult = false;
+		auto commit = std::make_shared<MockCommit>();
+		std::weak_ptr<MockCommit> lifetime = commit;
+		QueueProductionCommit( &window, std::move( commit ), waiter,
+			gamescope::BufferCommitSync::DmaBuf( fd ) );
+		assert( window.commit_queue.empty() );
+		assert( window.receivedDoneCommit );
+		assert( lifetime.expired() );
+	}
+	MockWindow window;
+	MockWaiter waiter;
+	auto commit = std::make_shared<MockCommit>();
+	QueueProductionCommit( &window, commit, waiter, gamescope::BufferCommitSync::SynchronousUpload() );
+	assert( window.commit_queue.size() == 1 );
+	assert( commit->signalCalls == 1 );
+}
+#endif
 
 int main()
 {
@@ -156,5 +215,9 @@ int main()
 	TestExplicitAcquireRetainsReadyState();
 	TestDmaBufStillWaits();
 	TestFailedWaitRegistrationDoesNotSignal();
+	TestFailedDmaBufDupDoesNotWaitOrSignal();
+#ifdef DROIDDECK_PRODUCTION_QUEUE_BLOCK
+	TestProductionCallerDropsUnwaitableCommits();
+#endif
 	std::puts( "Gamescope buffer commit synchronization tests passed" );
 }

@@ -26,7 +26,7 @@ diff --git a/src/steamcompmgr.cpp b/src/steamcompmgr.cpp
  	std::pair<int32_t, bool> eventFd = gamescope::CAcquireTimelinePoint::k_InvalidEvent;
  
  	if ( bPreemptiveUpscale )
-@@ -8589,31 +8587,36 @@ void update_wayland_res(CommitDoneList_t *doneCommits, steamcompmgr_win_t *w, Re
+@@ -8589,31 +8587,44 @@ void update_wayland_res(CommitDoneList_t *doneCommits, steamcompmgr_win_t *w, Re
  			pBackendFb->SetBuffer( buf );
  	}
  
@@ -50,7 +50,12 @@ diff --git a/src/steamcompmgr.cpp b/src/steamcompmgr.cpp
 +		[&]() -> std::optional<int> {
 +			struct wlr_dmabuf_attributes dmabuf = {0};
 +			if ( wlr_buffer_get_dmabuf( buf, &dmabuf ) )
-+				return dup( dmabuf.fd[0] );
++			{
++				int fd = dup( dmabuf.fd[0] );
++				if ( fd < 0 )
++					xwm_log.errorf( "Failed to duplicate DMA-BUF fence: %d", errno );
++				return fd;
++			}
 +			return std::nullopt;
 +		} );
 +	if ( commitSync.source == gamescope::BufferCommitSyncSource::SynchronousUpload )
@@ -79,6 +84,9 @@ diff --git a/src/steamcompmgr.cpp b/src/steamcompmgr.cpp
 -			g_ImageWaiter.AddWaitable( newCommit.get() );
 +		xwm_log.errorf( "Failed to queue %s commit fence fd %d for commit %lu",
 +			gamescope::BufferCommitSyncSourceName( commitSync.source ), commitSync.fence, newCommit->commitID );
++		// Dropping the commit releases its buffer and discards presentation feedback.
++		w->receivedDoneCommit = true;
++		return;
  	}
  
  	w->commit_queue.push_back( std::move(newCommit) );
@@ -86,7 +94,7 @@ diff --git a/src/buffer_commit_sync.hpp b/src/buffer_commit_sync.hpp
 new file mode 100644
 --- /dev/null
 +++ b/src/buffer_commit_sync.hpp
-@@ -0,0 +1,77 @@
+@@ -0,0 +1,79 @@
 +#pragma once
 +
 +#include <optional>
@@ -155,6 +163,8 @@ new file mode 100644
 +	bool mangoNudge, unsigned int mangoMsgType, DoneCommits *doneCommits )
 +{
 +	commit->SetFence( sync.fence, mangoNudge, mangoMsgType, doneCommits );
++	if ( !sync.knownReady && sync.fence < 0 )
++		return false;
 +	if ( sync.knownReady )
 +	{
 +		commit->Signal();

@@ -4,6 +4,7 @@ import java.io.File
 import org.json.JSONObject
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
+import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
 import org.junit.Rule
 import org.junit.Test
@@ -52,6 +53,22 @@ class WinFontComponentsTest {
         assertFalse(merged.containsKey("trebuchet_dll"))
         assertEquals("trebuchet", WinComponents.installable("trebuchet", merged + (twin.name to twin)))
         assertEquals(WinComponents.Support.UNSUPPORTED, WinComponents.support(unsafe, mapOf(unsafe.name to unsafe)))
+    }
+
+    @Test fun aFailedRefreshNeedsACompleteCacheBeforeAddingPinnedFonts() {
+        val cache = File(tmp.root, "catalog.json")
+        assertNull(WinComponents.loadCatalog(null, cache))
+        cache.writeText("invalid catalog")
+        assertNull(WinComponents.loadCatalog(null, cache))
+        val full = """{"components":[{"name":"d3dx9","status":"ready"}]}"""
+        assertEquals(setOf("d3dx9", "trebuchet", "verdana"),
+            WinComponents.loadCatalog(full, cache)!!.map { it.name }.toSet())
+        assertEquals(full, cache.readText())
+        assertEquals(setOf("d3dx9", "trebuchet", "verdana"),
+            WinComponents.loadCatalog(null, cache)!!.map { it.name }.toSet())
+        assertEquals(setOf("d3dx9", "trebuchet", "verdana"),
+            WinComponents.loadCatalog("invalid catalog", cache)!!.map { it.name }.toSet())
+        assertEquals(full, cache.readText())
     }
 
     @Test fun fontStagingUsesOnlyTheWindowsFontsDirectoryAndRealRegistrationKeys() {
