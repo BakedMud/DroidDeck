@@ -113,6 +113,18 @@ when conservative cleanup leaves extension-bearing modules intact. All 84
 captured Portal shaders passed SPIR-V validation after conversion with scalar
 block layout enabled.
 
+Clip-distance emulation is limited to complete vertex/fragment pipelines. For
+graphics-library flags, geometry or tessellation stages, and unsupported stage
+extension chains, the layer inspects pointer uses in the selected SPIR-V entry
+point after entry extraction and rejects the pipeline only when it accesses
+`BuiltIn ClipDistance`; the equivalent layout without that access passes through
+unchanged. Inactive entry points, unused interface declarations, and unused
+`ClipDistance` capabilities do not trigger the guard. Graphics-pipeline-library
+and shader-object extensions remain
+unavailable while clip emulation is active because those routes can bypass the
+complete-pipeline rewrite; unrelated native geometry and tessellation features
+remain exposed.
+
 Device validation on Pixel 11 Pro XL covered coherent and noncoherent shared
 mappings, reserve/remap lifetime, GPU buffer copies, normal and mutable image
 clears, and Portal reaching a rendered menu. Portal was also confirmed working
@@ -230,11 +242,14 @@ archive before replacing its entry in `release.json`; retain the other DXVK
 payload pins. A layer change that removes a previously advertised emulated feature
 must ship together with any consumer change needed to use its actual capabilities.
 
-The companion [Gamescope component](https://github.com/wallentx/DroidDeck/releases/tag/gamescope-cursor-20261014-1f9133df)
-passed [CI](https://github.com/wallentx/DroidDeck/actions/runs/38603263181) with the
+The companion [Gamescope component](https://github.com/wallentx/DroidDeck/releases/tag/gamescope-review-20261014-e0d8edb3)
+passed [CI](https://github.com/wallentx/DroidDeck/actions/runs/38642690776) with the
 downstream GPU presentation patches, upstream's per-window limiter fix through
 `4163b31b`, and nested cursor routing. The cursor, presentation, DMA-BUF, and SHM
-regressions passed in the combined source build. Its public archive hash, AArch64 executable, declared dependencies and
+regressions passed in the combined source build. Failed fence duplication or waiter
+registration drops the affected commit while retaining frame-callback progress;
+the regression compiles the actual production queueing block. Its public archive
+hash, AArch64 executable, declared dependencies and
 symbol requirements were checked before updating `tools/gamescope/release.env`.
 That older component path validates the archive hash, but does not enforce a
 recipe-input gate. Rebuild and verify its archive whenever its patch set changes;
