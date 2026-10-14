@@ -208,6 +208,7 @@ mkdir "$probe_capture/bare" "$probe_capture/compat"
   cd "$probe_capture/compat"
   unset DISABLE_WSI_LAYER
   export VK_INSTANCE_LAYERS=VK_LAYER_window_system_integration:VK_LAYER_HYBRIS_compat
+  export VK_LOADER_LAYERS_ENABLE='VK_LAYER_window_system_integration,VK_LAYER_HYBRIS_compat'
   export HYBRIS_BC_TEXTURES=dxvk
   if [ "${DROIDDECK_SYSTEM_VULKAN_PRESENTATION:-native}" = x11-shm ]; then
     export WSI_X11_FORCE_SHM=1
@@ -218,11 +219,32 @@ mkdir "$probe_capture/bare" "$probe_capture/compat"
   test -f "$1"
   mv "$1" ../compat.json
 )
+if grep -Eq 'Insert (instance|device) layer' "$probe_capture/bare/loader.txt"; then
+  printf '%s\n' 'bare capture inserted a layer' >&2
+  exit 1
+else
+  probe_status=$?
+  test "$probe_status" -eq 1 || exit "$probe_status"
+fi
+for probe_layer in VK_LAYER_window_system_integration VK_LAYER_HYBRIS_compat; do
+  if grep -Eq "Insert (instance|device) layer.*$probe_layer" "$probe_capture/compat/loader.txt"; then
+    :
+  else
+    probe_status=$?
+    test "$probe_status" -eq 1 || exit "$probe_status"
+    printf 'compat capture did not insert %s\n' "$probe_layer" >&2
+    exit 1
+  fi
+done
 printf 'Captures: %s\n' "$probe_capture"
 ```
 
-`VK_INSTANCE_LAYERS` selectively enables the named layers despite the blanket
-disable filter. [Vulkaninfo JSON output](https://github.com/KhronosGroup/Vulkan-Tools/blob/main/vulkaninfo/vulkaninfo.md)
+The tested runtime filtered out the requested layers when only
+`VK_INSTANCE_LAYERS` was set. The compat subprocess therefore explicitly permits
+both names with `VK_LOADER_LAYERS_ENABLE`, while retaining the requested
+colon-separated list in `VK_INSTANCE_LAYERS`. The trace checks
+fail closed: bare must insert no instance or device layer, while compat must insert
+both named layers. [Vulkaninfo JSON output](https://github.com/KhronosGroup/Vulkan-Tools/blob/main/vulkaninfo/vulkaninfo.md)
 otherwise defaults to GPU 0 and an auto-generated filename; the explicit selection
 and rename above avoid both ambiguities. Run the following from the checkout after
 copying out the captures:
@@ -338,6 +360,18 @@ identity and unsupported-feature checks remain active.
 The published component contains the same fifteen i386, x86_64 and ARM64X DLLs
 verified in the device test above, plus source, license, patches and producer
 provenance. Assembly and launch both reject plain ARM64 DLLs in this payload.
+
+On 2026-10-14 UTC, installed `20c93b76` was tested on the Pixel 8 Pro with
+Mali-G715 54.3.0 using **GPU drivers > Auto**. Steam reached `READY` at 1602x720,
+and Old School Rally reached its intro, responsive menus, and the Time Trial
+Arizona SS1 race scene with the Taurus RS, including brief acceleration. This was
+a bounded smoke test, not a completed race or performance benchmark. All 18 installed
+libraries and Mali DLL hashes matched the APK. Native, bare, and corrected compat
+captures were each semantically identical to their respective historical captures;
+the 13 native-collector conflicts persist, so the capability report remains
+incomplete and fails closed rather than establishing conformance. The compatibility
+`vulkaninfo` Wayland present-mode query still returned `ERROR_UNKNOWN` despite a
+successful capability export; this test does not establish present-mode conformance.
 
 
 The earlier opt-in `29a3a4e8` 0.4.0 APK was installed as an update on the same
