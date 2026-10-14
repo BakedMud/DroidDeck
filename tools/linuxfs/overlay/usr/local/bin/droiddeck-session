@@ -202,6 +202,9 @@ if [ -z "${BL_INSIDE:-}" ]; then
     sdl) export SDL_VIDEODRIVER=wayland ;;
     *) echo "== unsupported gamescope backend: $backend"; exit 64 ;;
   esac
+  if [ "$mode" = steam ]; then
+    export gamescope_cursor_composite=2
+  fi
   args=(--backend "$backend" --expose-wayland -f -W "$width" -H "$height" -w "$nested" -h "$height")
   [ "$nested" != "$width" ] && args+=(-S stretch) && export BL_STRETCHED=1
   if [ "${BL_FPS:-0}" -gt 0 ]; then

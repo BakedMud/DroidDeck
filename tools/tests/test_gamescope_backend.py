@@ -18,15 +18,17 @@ GRAPHICS_KEYS = ("DROIDDECK_SYSTEM_VULKAN_GPU", "DROIDDECK_SYSTEM_VULKAN_RUNTIME
 
 
 class GamescopeBackendTest(unittest.TestCase):
-    def select(self, backend=None):
+    def select(self, backend=None, mode="desktop"):
         source = SESSION.read_text()
         start = source.index('  backend=${BL_GAMESCOPE_BACKEND:-wayland}')
         end = source.index('\n', source.index('  args=(--backend ', start))
         script = 'width=1280; height=720; nested=1280\n' + source[start:end]
-        script += '\nprintf "%s\\n" "${args[0]}" "${args[1]}" "${SDL_VIDEODRIVER:-unset}"\n'
+        script += '\nprintf "%s\\n" "${args[0]}" "${args[1]}" "${SDL_VIDEODRIVER:-unset}" "${gamescope_cursor_composite:-unset}"\n'
         env = dict(os.environ)
         env.pop("BL_GAMESCOPE_BACKEND", None)
         env.pop("SDL_VIDEODRIVER", None)
+        env.pop("gamescope_cursor_composite", None)
+        env["mode"] = mode
         if backend is not None:
             env["BL_GAMESCOPE_BACKEND"] = backend
         return subprocess.run(["bash", "-c", script], env=env, text=True,
@@ -35,12 +37,19 @@ class GamescopeBackendTest(unittest.TestCase):
     def test_default_retains_the_wayland_backend(self):
         result = self.select()
         self.assertEqual(0, result.returncode, result.stderr)
-        self.assertEqual(["--backend", "wayland", "unset"], result.stdout.splitlines())
+        self.assertEqual(["--backend", "wayland", "unset", "unset"], result.stdout.splitlines())
 
     def test_sdl_uses_the_host_wayland_vulkan_swapchain(self):
         result = self.select("sdl")
         self.assertEqual(0, result.returncode, result.stderr)
-        self.assertEqual(["--backend", "sdl", "wayland"], result.stdout.splitlines())
+        self.assertEqual(["--backend", "sdl", "wayland", "unset"], result.stdout.splitlines())
+
+    def test_steam_cursor_composition_preserves_backend_selection(self):
+        for backend, sdl in (("wayland", "unset"), ("sdl", "wayland")):
+            with self.subTest(backend=backend):
+                result = self.select(backend, mode="steam")
+                self.assertEqual(0, result.returncode, result.stderr)
+                self.assertEqual(["--backend", backend, sdl, "2"], result.stdout.splitlines())
 
     def test_unknown_backend_fails_before_gamescope(self):
         result = self.select("drm")
