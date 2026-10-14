@@ -703,9 +703,9 @@
   "format": 1,
   "hybris": {
     "provenance": {
-      "component_ci_run": "https://github.com/wallentx/DroidDeck/actions/runs/38628031805",
+      "component_ci_run": "https://github.com/wallentx/DroidDeck/actions/runs/38645156760",
       "note": "Candidate pin: publish this exact archive and verify its URL before updating release.json.",
-      "producer_commit": "7ef8ab0e2ba8b7537257bf9629c7c603574ece2a",
+      "producer_commit": "332791218632d8981789267249fde77aedc71bfd",
       "upstream_source_commit": "bc8cb3586b79d208fd21b925fa0209b3e432e008"
     },
     "recipe_inputs": {
@@ -717,12 +717,13 @@
       "tools/hybris/patches/0004-mali-mapping-lock.patch": "8876d45d135133ea51c01ab71c89172b3ac75a4f1954f4f75dadcfc82d9d5af1",
       "tools/hybris/patches/0005-inline-shader-modules.patch": "8fb9c05b9d6f1dd2200a3d85122ae84e697dc306a17c16f3f8a7bbdb50f70e34",
       "tools/hybris/patches/0006-clip-shader-layout.patch": "b414e01a85720b6e7a460f8834cd5f9a020efef8c15df8766f00619086e05f5c",
+      "tools/hybris/patches/0007-clip-pipeline-contract.patch": "4018a569d7894d6253a12fa74daf5492758d36fb8c080d45118c408669a656be",
       "tools/hybris/powervr-hal-version.patch": "d3ed8ca03e5a874b9dc46651983117760c7490b96127335625d0480a2b85e66f",
       "tools/hybris/source.env": "9ae7985f2052dbcc8b9666494bc8a711ec85013f6a27d6d72d9729c32b919dd8"
     },
-    "sha256": "2057fce96150fa77cedac8de6ff02061081b35e8d9309e4f1ce2e93eee10a0cf",
-    "size": 5744875,
-    "tree_sha256": "562a604d20992163c64b0e8056fd732a077069296f02c9272ea119d7d2ec8ea5",
-    "url": "https://github.com/wallentx/DroidDeck/releases/download/hybris-7ef8ab0e2ba8b7537257bf9629c7c603574ece2a/runtime.tzst"
+    "sha256": "d881f8d606138172295470c1260f5175648c765353a8ede9d89be16c8c4dafc9",
+    "size": 5756099,
+    "tree_sha256": "463bb187bb6c9f944d01af1f113fceb14efcc2ed9fb145213978a2c81cdbed62",
+    "url": "https://github.com/wallentx/DroidDeck/releases/download/hybris-332791218632d8981789267249fde77aedc71bfd/runtime.tzst"
   }
 }
