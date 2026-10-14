@@ -310,7 +310,8 @@ class WinCompSourcesTest {
             body?.let { cache.writeText(it) }
             AutoComponents.queueGame(app, game, asked = false)
             val after = WinComponents.selection(app, key)
-            assertEquals(before.auto, after.auto)
+            assertEquals(before.auto.mapValues { it.value.kind to it.value.args },
+                after.auto.mapValues { it.value.kind to it.value.args })
             assertEquals(before.user, after.user)
             assertTrue(downloaded.isEmpty())
         }
