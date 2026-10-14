@@ -12,7 +12,7 @@ DroidDeck's `android_wlegl` / Android hardware buffer receiver.
 | Inner X11 presentation | Existing DRI3/Steam GL profile | Existing DRI3/Steam GL profile | Bundled X11 WSI with `WSI_X11_FORCE_SHM=1` |
 | Steam UI rendering | Software CEF; game graphics remain hardware accelerated | Existing GPU CEF path | Existing GPU CEF path |
 | Proton DXVK | Managed patched `dxvk` | Managed patched `dxvk-2.6.2` for 128-byte push constants | Managed experimental `dxvk-mali`, guarded to Mali-G715 driver 54.3.0 |
-| Session / game compatibility layers | compat / WSI + compat | compat / WSI + compat | compat / WSI + compat |
+| Session / game compatibility layers | compat / WSI + compat (+ placed for i386) | compat / WSI + compat | compat / WSI + compat |
 | Session / managed-game BC emulation | Existing policy / `dxvk` | `0` / `dxvk` | Existing policy / `dxvk` |
 
 X11 layer settings are applied after the outer Gamescope launch, including direct
@@ -28,12 +28,13 @@ with a managed DXVK payload, or native presentation with a user-selected payload
 | Environment key | Meaning |
 | --- | --- |
 | `DROIDDECK_SYSTEM_VULKAN_RUNTIME` | Selected bridge directory; takes precedence over the legacy alias |
-| `DROIDDECK_SYSTEM_VULKAN_GPU` | Diagnostic vendor identity; used for defaults by older profiles only |
+| `DROIDDECK_SYSTEM_VULKAN_GPU` | Vendor profile identity; selects compatibility defaults, including PowerVR's 32-bit placed-memory path |
 | `DROIDDECK_SYSTEM_VULKAN_PRESENTATION` | `native` preserves normal presentation; `x11-shm` enables the X11 client fallback |
 | `DROIDDECK_SYSTEM_VULKAN_DXVK` | `managed` uses the runtime wrapper/payload; `user` preserves Proton/DXVK/WineD3D choices |
 | `DROIDDECK_HYBRIS_SESSION_LAYERS` | Outer/session layer list, restored before launching a nested Gamescope |
 | `DROIDDECK_HYBRIS_SESSION_BC_TEXTURES` | Optional outer/session BC policy, restored before nested compositors; Xclipse sets `0` |
 | `BL_STEAM_CEF_SOFTWARE` | `1` selects `-cef-disable-gpu` for Steam's UI; selected by the PowerVR profile only |
+| `DROIDDECK_EXPERIMENTAL_PLACED_MEMORY` | `1` enables the bundled low-address memory layer for confirmed 32-bit Windows games; `0` disables the PowerVR default |
 
 `DROIDDECK_HYBRIS_LAYERS` separately specifies game compatibility layers;
 `DROIDDECK_HYBRIS_LAYER_PATH` adds their directory, and `DROIDDECK_HYBRIS_DXVK`
@@ -49,6 +50,39 @@ passes explicit `x11-shm`/`managed` fields for Mali Auto; those legacy defaults 
 not describe its current selection. The old
 `DROIDDECK_POWERVR_RUNTIME` alias remains available for PowerVR and Xclipse helpers.
 Manual driver selections retain their existing behavior.
+
+### 32-bit Windows memory mappings
+
+Wine's WoW64 Vulkan path requires mapped memory below 4 GiB. On the tested
+PowerVR driver, native mappings land above that range; Wine unmaps them and returns
+`VK_ERROR_OUT_OF_HOST_MEMORY` even when physical memory is available. The bundled
+`VK_LAYER_DROIDDECK_placed_memory` supplies `VK_EXT_map_memory_placed` using
+exported `OPAQUE_FD` memory and a shared mapping at Wine's reserved address.
+
+`droiddeck-game-env` enables this layer by default for PowerVR system-driver
+launches only after checking that the actual executable is PE32/i386. The layer
+runs below `VK_LAYER_HYBRIS_compat`, so resources created by BC translation follow
+the same export policy. Steam, native Linux programs and 64-bit Windows programs
+retain their existing layer lists. Explicit driver overrides bypass automatic
+activation. Set `DROIDDECK_EXPERIMENTAL_PLACED_MEMORY=0` to disable it, or `1` to
+test the same path on another system-driver profile such as Mali.
+
+The layer keeps the native driver mapping for flush/invalidate operations and
+preserves Wine's reserved address on unmap. Buffers and images use matching
+external-memory creation and allocation flags. Image configurations that cannot
+be exported retain native allocation with host-visible memory types excluded;
+the layer does not force host-memory imports onto unsupported images. Native
+placed-memory support takes precedence, and unsupported explicit external-handle
+contracts fail rather than being silently rewritten.
+
+Device validation on Pixel 11 Pro XL covered coherent and noncoherent shared
+mappings, reserve/remap lifetime, GPU buffer copies, normal and mutable image
+clears, and Portal reaching a rendered menu. Portal was also confirmed working
+by the user. Mali, other PowerVR drivers, and sustained gameplay/performance need
+separate device validation. The original launch crash additionally required
+Steam to verify Proton Experimental: its installed Windows and Unix Vulkan
+modules used incompatible dispatch tables. This layer does not repair corrupt
+or mixed Proton installations.
 
 ### PowerVR Steam UI containment
 
@@ -78,8 +112,8 @@ Android compositor
 
 The app selects the shared `VK_LAYER_HYBRIS_compat` layer for all three profiles;
 it no longer stages or enables a standalone Xclipse layer. The runtime uses
-[component release `fdaed477`](https://github.com/wallentx/DroidDeck/releases/tag/hybris-fdaed47732a466add2dfc8b530d1bd9d9c916941),
-built by [component CI](https://github.com/wallentx/DroidDeck/actions/runs/38475082027).
+[component release `e96d463b`](https://github.com/wallentx/DroidDeck/releases/tag/hybris-e96d463b1d7069de6f0f6a224e0ba3808192e365),
+built by [component CI](https://github.com/wallentx/DroidDeck/actions/runs/38525738326).
 `tools/powervr/release.json` records the verified archive and tree checksums, recipe
 inputs, producer commit, and upstream source revision.
 

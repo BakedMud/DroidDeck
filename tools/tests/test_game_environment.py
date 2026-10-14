@@ -4,6 +4,7 @@ import os
 import shutil
 from pathlib import Path
 import runpy
+import struct
 import subprocess
 import sys
 import tempfile
@@ -71,8 +72,8 @@ class SystemGraphicsLaunchTest(unittest.TestCase):
             launch, result = MODULE["system_graphics_launch"](command, env)
             self.assertEqual(launch, [str(runtime / "run-proton.py"), *command])
             self.assertEqual(result["HYBRIS_BC_TEXTURES"], "dxvk")
-            self.assertEqual(result["VK_LAYER_PATH"], f"{runtime}/wsi:{runtime}/lib")
-            self.assertEqual(result["VK_INSTANCE_LAYERS"], "VK_LAYER_window_system_integration:VK_LAYER_HYBRIS_compat")
+            self.assertEqual(result["VK_LAYER_PATH"], f"{runtime}/wsi:{runtime}/lib:old")
+            self.assertEqual(result["VK_INSTANCE_LAYERS"], "VK_LAYER_window_system_integration:old:VK_LAYER_HYBRIS_compat")
             self.assertEqual(result["VK_LOADER_LAYERS_DISABLE"], "*gamescope*")
             self.assertEqual(result["ENABLE_GAMESCOPE_WSI"], "0")
             self.assertEqual(result["DISABLE_VK_LAYER_VALVE_steam_fossilize_1"], "1")
@@ -373,6 +374,227 @@ class SystemGraphicsLaunchTest(unittest.TestCase):
             self.assertEqual(args, [path, *selected])
             self.assertEqual(actual_env["WINESERVER"], "/sync-pack/wineserver")
             self.assertEqual(actual_env["BL_SYNC_PACK"], "selected")
+
+
+class PlacedMemoryLaunchTest(unittest.TestCase):
+    runtime = SystemGraphicsLaunchTest.runtime
+    setting = "DROIDDECK_EXPERIMENTAL_PLACED_MEMORY"
+    layer = "VK_LAYER_DROIDDECK_placed_memory"
+    library = "libVkLayer_DROIDDECK_placed_memory.so"
+    manifest = "VkLayer_DROIDDECK_placed_memory.json"
+
+    def executable(self, root, machine=0x14c, magic=0x10b, name="game.exe"):
+        # One PE section and the full standard PE32 optional-header footprint.
+        data = bytearray(513)
+        data[:2] = b"MZ"
+        struct.pack_into("<I", data, 60, 128)
+        data[128:132] = b"PE\0\0"
+        struct.pack_into("<HHIIIHH", data, 132, machine, 1, 0, 0, 0, 224, 0x102)
+        struct.pack_into("<H", data, 152, magic)
+        struct.pack_into("<I", data, 152 + 92, 16)
+        data[376:381] = b".text"
+        path = root / name
+        path.write_bytes(data)
+        return path
+
+    def components(self, runtime):
+        (runtime / "lib" / self.library).write_bytes(b"native component")
+        (runtime / "lib" / self.manifest).write_text(json.dumps({
+            "file_format_version": "1.2.0", "layer": {
+                "name": self.layer, "type": "GLOBAL", "library_path": "./" + self.library,
+            },
+        }))
+
+    def environment(self, runtime, gpu="powervr", **extra):
+        return dict({"DROIDDECK_SYSTEM_VULKAN_RUNTIME": str(runtime),
+                     "DROIDDECK_SYSTEM_VULKAN_GPU": gpu,
+                     "STEAM_COMPAT_DATA_PATH": "/compatdata/42"}, **extra)
+
+    def launch(self, exe, env, proton="/selected/proton", verb="waitforexitandrun"):
+        return MODULE["system_graphics_launch"]([proton, verb, str(exe)], env)
+
+    def test_powervr_i386_activates_below_compat_without_mutating_session(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            runtime, _ = self.runtime(root)
+            self.components(runtime)
+            exe = self.executable(root, name="game with spaces.dat")
+            env = self.environment(runtime, DROIDDECK_HYBRIS_SESSION_LAYERS="VK_LAYER_HYBRIS_compat",
+                                   VK_INSTANCE_LAYERS="VK_LAYER_HYBRIS_compat",
+                                   VK_ICD_FILENAMES=str(runtime / "icd.json"))
+            saved = dict(env)
+            command, actual = self.launch(exe, env)
+            self.assertEqual(command, [str(runtime / "run-proton.py"), "/selected/proton",
+                                       "waitforexitandrun", str(exe)])
+            self.assertEqual(actual[self.setting], "1")
+            self.assertEqual(actual["VK_INSTANCE_LAYERS"],
+                             "VK_LAYER_window_system_integration:VK_LAYER_HYBRIS_compat:" + self.layer)
+            self.assertEqual(actual["DROIDDECK_HYBRIS_SESSION_LAYERS"], "VK_LAYER_HYBRIS_compat")
+            self.assertEqual(env, saved)
+
+    def test_opt_out_and_unknown_settings_leave_old_runtime_usable(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            runtime, _ = self.runtime(root)
+            exe = self.executable(root)
+            for setting in ("0", "", "invalid"):
+                with self.subTest(setting=setting):
+                    env = self.environment(runtime, **{self.setting: setting})
+                    _, actual = self.launch(exe, env)
+                    self.assertNotIn(self.layer, actual["VK_INSTANCE_LAYERS"])
+                    self.assertEqual(actual[self.setting], setting)
+
+    def test_mali_and_other_system_profiles_require_explicit_opt_in(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            runtime, _ = self.runtime(root)
+            self.components(runtime)
+            exe = self.executable(root)
+            for gpu in ("mali", "xclipse", "future-vendor", ""):
+                with self.subTest(gpu=gpu):
+                    env = self.environment(runtime, gpu)
+                    _, default = self.launch(exe, env)
+                    self.assertNotIn(self.layer, default["VK_INSTANCE_LAYERS"])
+                    _, requested = self.launch(exe, dict(env, **{self.setting: "1"}))
+                    self.assertTrue(requested["VK_INSTANCE_LAYERS"].endswith(":" + self.layer))
+
+    def test_x64_arm64_and_arm64ec_never_activate_even_when_requested(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            runtime, _ = self.runtime(root)
+            for machine in (0x8664, 0xaa64, 0xa641, 0xa64e):
+                with self.subTest(machine=hex(machine)):
+                    exe = self.executable(root, machine, 0x20b)
+                    for extra in ({}, {self.setting: "1"}):
+                        _, actual = self.launch(exe, self.environment(runtime, **extra))
+                        self.assertNotIn(self.layer, actual["VK_INSTANCE_LAYERS"])
+
+    def test_non_game_native_and_other_entry_points_do_not_activate(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            runtime, _ = self.runtime(root)
+            exe = self.executable(root)
+            env = self.environment(runtime, **{self.setting: "1"})
+            for proton, verb in (("/selected/not-proton", "waitforexitandrun"),
+                                 ("/selected/proton", "run"), ("/selected/proton", "getcompatpath")):
+                with self.subTest(proton=proton, verb=verb):
+                    _, actual = self.launch(exe, env, proton, verb)
+                    self.assertNotIn(self.layer, actual.get("VK_INSTANCE_LAYERS", ""))
+            native = [str(exe), "--fullscreen"]
+            self.assertEqual(MODULE["system_graphics_launch"](native, env), (native, env))
+            _, actual = self.launch(exe, dict(env, STEAM_COMPAT_DATA_PATH="/compatdata/0"))
+            self.assertNotIn(self.layer, actual.get("VK_INSTANCE_LAYERS", ""))
+            for name in ("steam.exe", "steamwebhelper.exe", "iscriptevaluator.exe"):
+                _, actual = self.launch(self.executable(root, name=name), env)
+                self.assertNotIn(self.layer, actual["VK_INSTANCE_LAYERS"])
+
+    def test_manual_icds_and_non_system_launches_remain_unmodified(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            runtime, _ = self.runtime(root)
+            exe = self.executable(root)
+            for selection in ({"VK_ICD_FILENAMES": "/manual/icd.json"},
+                              {"VK_DRIVER_FILES": "/manual/icd.json",
+                               "VK_ICD_FILENAMES": str(runtime / "icd.json")},
+                              {"VK_ADD_DRIVER_FILES": "/manual/icd.json"},
+                              {"VK_ICD_FILENAMES": str(runtime / "icd.json") + ":/manual/icd.json"}):
+                with self.subTest(selection=selection):
+                    env = self.environment(runtime, **selection, **{self.setting: "1"})
+                    _, actual = self.launch(exe, env)
+                    self.assertNotIn(self.layer, actual["VK_INSTANCE_LAYERS"])
+                    for name, value in selection.items():
+                        self.assertEqual(actual[name], value)
+            env = {"STEAM_COMPAT_DATA_PATH": "/compatdata/42", self.setting: "1",
+                   "VK_ICD_FILENAMES": "/adreno/icd.json"}
+            command = ["/selected/proton", "waitforexitandrun", str(exe)]
+            self.assertEqual(MODULE["system_graphics_launch"](command, env), (command, env))
+
+    def test_layer_overrides_keep_external_layers_and_search_paths(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            runtime, _ = self.runtime(root)
+            self.components(runtime)
+            exe = self.executable(root)
+            env = self.environment(runtime,
+                                   VK_INSTANCE_LAYERS="VK_LAYER_before:VK_LAYER_HYBRIS_compat:VK_LAYER_after:" + self.layer,
+                                   DROIDDECK_HYBRIS_LAYERS="VK_LAYER_HYBRIS_compat:VK_LAYER_extra",
+                                   VK_LAYER_PATH=f"/custom:{runtime}/lib:/second",
+                                   DROIDDECK_HYBRIS_LAYER_PATH="/vendor:/custom")
+            _, actual = self.launch(exe, env)
+            self.assertEqual(actual["VK_INSTANCE_LAYERS"],
+                             "VK_LAYER_window_system_integration:VK_LAYER_before:VK_LAYER_HYBRIS_compat:"
+                             "VK_LAYER_after:VK_LAYER_extra:" + self.layer)
+            self.assertEqual(actual["VK_LAYER_PATH"], f"{runtime}/wsi:{runtime}/lib:/vendor:/custom:/second")
+            self.assertEqual(actual["VK_INSTANCE_LAYERS"].split(":").count(self.layer), 1)
+
+    def test_missing_or_invalid_new_components_fail_only_when_activation_is_requested(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            runtime, _ = self.runtime(root)
+            exe = self.executable(root)
+            env = self.environment(runtime)
+            for name in (self.library, self.manifest):
+                self.components(runtime)
+                (runtime / "lib" / name).unlink()
+                with self.subTest(missing=name), self.assertRaisesRegex(MODULE["SystemGraphicsError"], name):
+                    self.launch(exe, env)
+                self.launch(exe, dict(env, **{self.setting: "0"}))
+                self.launch(self.executable(root, 0x8664, 0x20b, "x64.exe"), env)
+            self.components(runtime)
+            path = runtime / "lib" / self.manifest
+            valid = json.loads(path.read_text())
+            variants = [b"not json", b"[]", b" " * 65537]
+            for field, value in (("name", "VK_LAYER_other"), ("type", "DEVICE"),
+                                 ("library_path", "../other.so"), ("library_path", "/outside/other.so")):
+                changed = {**valid, "layer": {**valid["layer"], field: value}}
+                variants.append(json.dumps(changed).encode())
+            for data in variants:
+                with self.subTest(manifest=data[:80]):
+                    path.write_bytes(data)
+                    with self.assertRaises(MODULE["SystemGraphicsError"]):
+                        self.launch(exe, env)
+
+    def test_game_layer_override_can_replace_the_inherited_session_stack(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            runtime, _ = self.runtime(root)
+            self.components(runtime)
+            exe = self.executable(root)
+            for configured in ("", "VK_LAYER_custom"):
+                with self.subTest(configured=configured):
+                    env = self.environment(runtime, DROIDDECK_HYBRIS_LAYERS=configured,
+                                           DROIDDECK_HYBRIS_SESSION_LAYERS="VK_LAYER_HYBRIS_compat",
+                                           VK_INSTANCE_LAYERS="VK_LAYER_HYBRIS_compat")
+                    _, actual = self.launch(exe, env)
+                    self.assertEqual(actual["VK_INSTANCE_LAYERS"], ":".join(filter(None, (
+                        "VK_LAYER_window_system_integration", configured, self.layer))))
+
+    def test_pe_classification_rejects_malformed_headers_and_filename_guesses(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            exe = self.executable(root)
+            valid = exe.read_bytes()
+            cases = [b"", b"MZ", b"\x7fELF" + b"\0" * 600, valid[:64], valid[:160],
+                     b"MZ" + b"This program cannot be run in DOS mode." + b"\0" * 512]
+            for offset, form, value in ((60, "I", 0xffffffff), (60, "I", 63),
+                                        (134, "H", 97), (148, "H", 4097), (148, "H", 95),
+                                        (150, "H", 0x2102), (150, "H", 0x100),
+                                        (152, "H", 0x20b), (244, "I", 17)):
+                data = bytearray(valid)
+                struct.pack_into("<" + form, data, offset, value)
+                cases.append(bytes(data))
+            runtime, _ = self.runtime(root)
+            for index, data in enumerate(cases):
+                with self.subTest(index=index):
+                    exe.write_bytes(data)
+                    self.assertFalse(MODULE["is_i386_pe_executable"](str(exe)))
+                    _, actual = self.launch(exe, self.environment(runtime))
+                    self.assertNotIn(self.layer, actual["VK_INSTANCE_LAYERS"])
+            self.assertFalse(MODULE["is_i386_pe_executable"](str(root / "missing.exe")))
+            self.assertFalse(MODULE["is_i386_pe_executable"](str(root)))
+            fifo = root / "pipe.exe"
+            os.mkfifo(fifo)
+            self.assertFalse(MODULE["is_i386_pe_executable"](str(fifo)))
 
 
 class ReadConfigMappingTest(unittest.TestCase):

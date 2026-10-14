@@ -3,6 +3,7 @@ import json
 import os
 import re
 import runpy
+import stat
 import subprocess
 import sys
 from pathlib import Path
@@ -299,6 +300,113 @@ class SystemGraphicsError(ValueError):
     pass
 
 
+PLACED_MEMORY_SETTING = "DROIDDECK_EXPERIMENTAL_PLACED_MEMORY"
+PLACED_MEMORY_LAYER = "VK_LAYER_DROIDDECK_placed_memory"
+PLACED_MEMORY_LIBRARY = "libVkLayer_DROIDDECK_placed_memory.so"
+PLACED_MEMORY_MANIFEST = "VkLayer_DROIDDECK_placed_memory.json"
+
+
+def is_i386_pe_executable(program):
+    """Classify a regular PE32 executable from bounded metadata, never its name."""
+    try:
+        descriptor = os.open(program, os.O_RDONLY | os.O_NONBLOCK)
+        with os.fdopen(descriptor, "rb") as stream:
+            metadata = os.fstat(stream.fileno())
+            if not stat.S_ISREG(metadata.st_mode):
+                return False
+            dos = stream.read(64)
+            if len(dos) != 64 or dos[:2] != b"MZ":
+                return False
+            offset = int.from_bytes(dos[60:64], "little")
+            if not 64 <= offset <= 1024 * 1024 or offset + 24 > metadata.st_size:
+                return False
+            stream.seek(offset)
+            header = stream.read(24)
+            if len(header) != 24 or header[:4] != b"PE\0\0":
+                return False
+            machine = int.from_bytes(header[4:6], "little")
+            sections = int.from_bytes(header[6:8], "little")
+            optional_size = int.from_bytes(header[20:22], "little")
+            flags = int.from_bytes(header[22:24], "little")
+            if (machine != 0x14c or not flags & 0x2 or flags & 0x2000 or
+                    not 1 <= sections <= 96 or not 96 <= optional_size <= 4096 or
+                    offset + 24 + optional_size + sections * 40 > metadata.st_size):
+                return False
+            optional = stream.read(96)
+            return (len(optional) == 96 and optional[:2] == b"\x0b\x01" and
+                    int.from_bytes(optional[92:96], "little") <= (optional_size - 96) // 8)
+    except (OSError, ValueError, TypeError):
+        return False
+
+
+def system_icd_selected(directory, env):
+    """An explicit manual ICD selection must not receive an automatic layer."""
+    if env.get("VK_ADD_DRIVER_FILES"):
+        return False
+    selected = env.get("VK_DRIVER_FILES") or env.get("VK_ICD_FILENAMES")
+    if not selected:
+        return True
+    paths = selected.split(os.pathsep)
+    try:
+        return len(paths) == 1 and Path(paths[0]).resolve() == (directory / "icd.json").resolve()
+    except (OSError, ValueError):
+        return False
+
+
+def placed_memory_requested(command, directory, env):
+    setting = env.get(PLACED_MEMORY_SETTING)
+    if setting not in (None, "1") or (setting != "1" and env.get("DROIDDECK_SYSTEM_VULKAN_GPU") != "powervr"):
+        return False
+    if Path(command[2]).name.lower() in ("steam.exe", "steamwebhelper.exe", "iscriptevaluator.exe"):
+        return False
+    return (Path(command[0]).name == "proton" and system_icd_selected(directory, env) and
+            is_i386_pe_executable(command[2]))
+
+
+def validate_placed_memory(directory):
+    library = directory / "lib" / PLACED_MEMORY_LIBRARY
+    manifest = directory / "lib" / PLACED_MEMORY_MANIFEST
+    try:
+        for path in (library, manifest):
+            if not path.is_file() or not path.stat().st_size:
+                raise SystemGraphicsError("missing system Vulkan placed-memory component: %s" % path.name)
+        with manifest.open("rb") as stream:
+            data = stream.read(65537)
+        if len(data) > 65536:
+            raise SystemGraphicsError("system Vulkan placed-memory manifest exceeds 64 KiB")
+        document = json.loads(data)
+        layer = document.get("layer") if isinstance(document, dict) else None
+        if (not isinstance(layer, dict) or layer.get("name") != PLACED_MEMORY_LAYER or
+                layer.get("type") != "GLOBAL" or
+                layer.get("library_path") not in (PLACED_MEMORY_LIBRARY, "./" + PLACED_MEMORY_LIBRARY)):
+            raise SystemGraphicsError("invalid system Vulkan placed-memory manifest: %s" % manifest.name)
+    except (OSError, ValueError, UnicodeError) as error:
+        if isinstance(error, SystemGraphicsError):
+            raise
+        raise SystemGraphicsError("system Vulkan placed-memory component is unreadable: %s" % error) from error
+
+
+def ordered_values(*values):
+    result = []
+    for value in values:
+        for item in value.split(os.pathsep):
+            if item and item not in result:
+                result.append(item)
+    return result
+
+
+def game_layers(env):
+    configured = env.get("DROIDDECK_HYBRIS_LAYERS", "VK_LAYER_HYBRIS_compat")
+    inherited = env.get("VK_INSTANCE_LAYERS", "")
+    session = ordered_values("VK_LAYER_window_system_integration",
+                             env.get("DROIDDECK_HYBRIS_SESSION_LAYERS", "VK_LAYER_HYBRIS_compat"))
+    # Inherited session layers give way to the game profile. A caller's extra
+    # layers instead retain their placement around existing compatibility layers.
+    if any(name not in session for name in ordered_values(inherited)):
+        return ordered_values("VK_LAYER_window_system_integration", inherited, configured)
+    return ordered_values("VK_LAYER_window_system_integration", configured)
+
+
 def system_graphics_launch(command, env):
     """Use the APK's system Vulkan compatibility files only for actual Proton game launches."""
     runtime = env.get("DROIDDECK_SYSTEM_VULKAN_RUNTIME") or env.get("DROIDDECK_POWERVR_RUNTIME")
@@ -341,11 +449,18 @@ def system_graphics_launch(command, env):
     except OSError as error:
         raise SystemGraphicsError("system Vulkan component is unreadable: %s" % error) from error
     result = dict(env)
-    layers = "VK_LAYER_window_system_integration:" + env.get("DROIDDECK_HYBRIS_LAYERS", "VK_LAYER_HYBRIS_compat")
+    layers = game_layers(env)
+    if placed_memory_requested(command, directory, env):
+        validate_placed_memory(directory)
+        # Move only this layer: all caller-selected layers retain their order,
+        # and the placed-memory bridge sees hybris compat's translated resources.
+        layers = [name for name in layers if name != PLACED_MEMORY_LAYER] + [PLACED_MEMORY_LAYER]
+        result[PLACED_MEMORY_SETTING] = "1"
     result.update({
-        "VK_LAYER_PATH": ":".join(filter(None, (str(directory / "wsi"), str(directory / "lib"),
-                                                env.get("DROIDDECK_HYBRIS_LAYER_PATH")))),
-        "VK_INSTANCE_LAYERS": layers,
+        "VK_LAYER_PATH": os.pathsep.join(ordered_values(str(directory / "wsi"), str(directory / "lib"),
+                                                       env.get("DROIDDECK_HYBRIS_LAYER_PATH", ""),
+                                                       env.get("VK_LAYER_PATH", ""))),
+        "VK_INSTANCE_LAYERS": os.pathsep.join(layers),
         "ENABLE_GAMESCOPE_WSI": "0",
         "VK_LOADER_LAYERS_DISABLE": "*gamescope*",
         "DISABLE_VK_LAYER_VALVE_steam_fossilize_1": "1",

@@ -334,6 +334,8 @@
     <string name="wincomp_auto_gog">From GOG\'s list for this game</string>
     <string name="wincomp_auto_epic">From Epic\'s prerequisites for this game</string>
     <string name="wincomp_auto_amazon">From Amazon\'s install steps for this game</string>
+    <string name="wincomp_src_game">Game requirements</string>
+    <string name="wincomp_auto_known_game">Fonts requested by %1$s (app %2$s)</string>
     <string name="wincomp_steam_by_name">Steam installs %1$s with app %2$s, matched by name</string>
     <string name="wincomp_suggestions">Also listed</string>
     <string name="wincomp_suggestion_reason">Listed by %1$s; not a component here</string>

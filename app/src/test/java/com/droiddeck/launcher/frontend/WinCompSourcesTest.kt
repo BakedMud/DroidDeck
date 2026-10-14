@@ -2,6 +2,7 @@ package com.droiddeck.launcher.frontend
 
 import com.droiddeck.launcher.runtime.LinuxRuntime
 import com.droiddeck.launcher.session.WinComponents
+import com.droiddeck.launcher.session.WinFontComponents
 import com.droiddeck.launcher.stores.Store
 import com.droiddeck.launcher.stores.StoreGameSidecar
 import java.io.ByteArrayOutputStream
@@ -58,6 +59,17 @@ class WinCompSourcesTest {
 
     @Test fun steamworksSharedDepotsMapToComponents() {
         assertEquals(listOf("vcredist2015_dll" to "VC++ 2015", "d3dx9" to "DirectX (June 2010)"), WinCompSources.steamDepots(listOf("228986", "228990", "999")))
+    }
+
+    @Test fun portalFontRequirementsHaveTheirOwnProvenanceAndOtherGamesAreUnaffected() {
+        val findings = WinCompSources.steamList(app, null, 400, "Portal", auto = true)
+            .filter { it.origin == WinCompSources.Origin.KNOWN_GAME }
+        assertEquals(listOf("trebuchet", "verdana"), findings.map { it.component })
+        assertTrue(findings.all { it.auto && it.args == listOf("Portal", "400") })
+        assertTrue(WinCompSources.steamList(app, null, 620, "Portal 2", auto = true)
+            .none { it.origin == WinCompSources.Origin.KNOWN_GAME })
+        assertTrue(WinCompSources.steamList(app, null, 400, "Name-only match", auto = false)
+            .none { it.origin == WinCompSources.Origin.KNOWN_GAME })
     }
 
 
@@ -264,6 +276,23 @@ class WinCompSourcesTest {
         assertEquals(setOf("d3dx9", "vcredist2013_dll"), WinComponents.picks(app, "1262580").toSet())
         assertEquals("STEAM", sel.auto.getValue("vcredist2013_dll").kind)
         assertEquals(3, AutoComponents.cachedFindings(app, "1262580")!!.count { it.auto })
+    }
+
+    @Test fun portalFontsRefreshOldFindingsAndRespectTheUsersOffSwitch() = withFakeWorker {
+        AutoComponents.catalogOf = { _, _ -> WinFontComponents.components() }
+        val portal = game(tmp.newFolder("Portal"), Library.SOURCE_STEAM, 400, library = "steam", name = "Portal")
+        WinComponents.setUser(app, "400", "trebuchet", false)
+        val oldSignature = AutoComponents.signature(app, portal).removePrefix("font-requirements-v1|")
+        File(app.filesDir, "wincomp-findings.json").writeText(JSONObject().put("400", JSONObject()
+            .put("sig", oldSignature).put("findings", org.json.JSONArray())).toString())
+        AutoComponents.queueGame(app, portal, asked = false)
+        assertEquals(listOf("verdana"), downloaded)
+        assertEquals(listOf("verdana"), WinComponents.picks(app, "400"))
+        val selection = WinComponents.selection(app, "400")
+        assertEquals(false, selection.user["trebuchet"])
+        assertEquals(setOf("trebuchet", "verdana"), selection.auto.keys)
+        assertTrue(selection.auto.values.all { it.kind == "KNOWN_GAME" })
+        assertEquals(2, AutoComponents.cachedFindings(app, "400")!!.count { it.auto })
     }
 
     @Test fun theQueueWaitsWhileASessionRunsAndResumesAfter() = withFakeWorker {
