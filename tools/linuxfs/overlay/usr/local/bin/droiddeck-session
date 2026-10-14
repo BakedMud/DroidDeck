@@ -678,7 +678,7 @@ BUSCONF
         export ENABLE_GAMESCOPE_WSI=0 VK_LOADER_LAYERS_DISABLE='*gamescope*' DISABLE_GAMESCOPE_WSI=1
         export BL_STEAM_GL_WSI_ACTIVE=1
         unset LIBGL_KOPPER_DISABLE
-        echo "== steam: system Vulkan presents GPU-composited Zink through the managed WSI layer"
+        echo "== steam: system Vulkan managed WSI presentation configured"
       else
         export DISABLE_GAMESCOPE_WSI=1 LIBGL_KOPPER_DISABLE=true
         unset BL_STEAM_GL_WSI_ACTIVE
@@ -785,7 +785,11 @@ BUSCONF
         done
       ) &
     fi
-    if [ "${BL_STEAM_GL_PRESENT:-}" = 1 ]; then
+    if [ "${BL_STEAM_CEF_SOFTWARE:-}" = 1 ]; then
+      # CEF-only: global Mesa software overrides would also reach launched games.
+      _bl_cef=(-cef-disable-gpu)
+      echo "== steam: CEF software rendering selected (-cef-disable-gpu)"
+    elif [ "${BL_STEAM_GL_PRESENT:-}" = 1 ]; then
       _bl_cef=(-cef-force-gpu "${bl_steam_presentation[@]}" -cef-use-gl=angle "-cef-use-angle=$bl_steam_angle")
     fi
     echo "== steam args: ${_bl_ui[*]} ${_bl_cdp[*]} ${_bl_lang[*]} -clientbeta $steam_channel -no-cef-sandbox -cef-ozone-platform=x11 ${_bl_cef[*]} $*"

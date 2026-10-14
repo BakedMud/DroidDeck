@@ -53,16 +53,20 @@ class SystemVulkanSelectionTest {
         assertTrue(env.contains("BL_GAMESCOPE_BACKEND=sdl"))
         assertTrue(env.contains("VK_INSTANCE_LAYERS=VK_LAYER_HYBRIS_compat"))
         assertFalse(env.any { it.startsWith("BL_POWERVR_") || it.startsWith("BL_STEAM_GL_PRESENT=") })
+        assertFalse(env.any { it.startsWith("BL_STEAM_CEF_SOFTWARE=") })
         // The outer compositor uses Wayland; the guest helpers scope X11 WSI to clients.
         assertFalse(env.any { it.startsWith("WSI_X11_FORCE_SHM=") })
     }
 
-    @Test fun powerVrRetainsItsRenderNodeAndSteamGlProfile() {
+    @Test fun powerVrUsesSoftwareSteamUiAndKeepsHardwareGamePolicy() {
         val env = mutableListOf<String>()
         SystemVulkanDriver.addEnvironment(File("/runtime"), "/vendor/lib64/hw/vulkan.powervr.so", "/dev/dri/renderD130", 37, env)
         assertTrue(env.contains("BL_POWERVR_RENDER_NODE=/dev/dri/renderD130"))
         assertTrue(env.contains("BL_POWERVR_DRM_HANDLES=1"))
         assertTrue(env.contains("BL_STEAM_GL_PRESENT=1"))
+        assertTrue(env.contains("BL_STEAM_CEF_SOFTWARE=1"))
+        assertTrue(env.contains("DROIDDECK_SYSTEM_VULKAN_PRESENTATION=native"))
+        assertTrue(env.contains("DROIDDECK_HYBRIS_DXVK=dxvk"))
         assertTrue(env.contains("DROIDDECK_SYSTEM_VULKAN_GPU=powervr"))
         assertThrows(IllegalStateException::class.java) {
             SystemVulkanDriver.addEnvironment(File("/runtime"), "/vendor/lib64/hw/vulkan.powervr.so", null, 37, mutableListOf())
@@ -82,6 +86,7 @@ class SystemVulkanSelectionTest {
         assertTrue(env.contains("HYBRIS_BC_TEXTURES=0"))
         assertTrue(env.contains("DROIDDECK_HYBRIS_SESSION_BC_TEXTURES=0"))
         assertTrue(env.contains("DROIDDECK_HYBRIS_DXVK=dxvk-2.6.2"))
+        assertFalse(env.any { it.startsWith("BL_STEAM_CEF_SOFTWARE=") })
         assertTrue(env.contains("BL_POWERVR_RENDER_NODE=/dev/dri/renderD128"))
         assertTrue(env.contains("BL_POWERVR_DRM_HANDLES=1"))
         assertTrue(env.contains("BL_STEAM_GL_PRESENT=1"))

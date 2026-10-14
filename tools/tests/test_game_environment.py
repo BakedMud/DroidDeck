@@ -244,6 +244,29 @@ class SystemGraphicsLaunchTest(unittest.TestCase):
                             self.assertEqual(result["VK_LAYER_PATH"], f"{runtime}/wsi:{runtime}/lib:/vendor layers")
                             self.assertEqual(env, saved)
 
+    def test_software_steam_cef_keeps_native_and_proton_game_graphics(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            runtime, _ = self.runtime(Path(tmp))
+            env = {"DROIDDECK_SYSTEM_VULKAN_RUNTIME": str(runtime),
+                   "DROIDDECK_SYSTEM_VULKAN_GPU": "powervr",
+                   "DROIDDECK_SYSTEM_VULKAN_PRESENTATION": "native",
+                   "DROIDDECK_SYSTEM_VULKAN_DXVK": "managed",
+                   "DROIDDECK_HYBRIS_DXVK": "dxvk",
+                   "STEAM_COMPAT_DATA_PATH": "/compatdata/42",
+                   "VK_LAYER_PATH": f"{runtime}/wsi:{runtime}/lib",
+                   "VK_INSTANCE_LAYERS": "VK_LAYER_window_system_integration:VK_LAYER_HYBRIS_compat"}
+            for command in (["/selected/proton", "waitforexitandrun", "game.exe"],
+                            ["/native/game", "--fullscreen"]):
+                with self.subTest(command=command):
+                    baseline_command, baseline_env = MODULE["system_graphics_launch"](command, env)
+                    software_env = dict(env, BL_STEAM_CEF_SOFTWARE="1")
+                    game_command, game_env = MODULE["system_graphics_launch"](command, software_env)
+                    self.assertEqual(game_command, baseline_command)
+                    self.assertEqual({key: value for key, value in game_env.items()
+                                      if key != "BL_STEAM_CEF_SOFTWARE"}, baseline_env)
+                    self.assertNotIn("LIBGL_ALWAYS_SOFTWARE", game_env)
+                    self.assertNotIn("GALLIUM_DRIVER", game_env)
+
     def test_invalid_system_capabilities_fail_before_proton_exec(self):
         with tempfile.TemporaryDirectory() as tmp:
             runtime, _ = self.runtime(Path(tmp))

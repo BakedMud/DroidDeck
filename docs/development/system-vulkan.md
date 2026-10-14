@@ -10,6 +10,7 @@ DroidDeck's `android_wlegl` / Android hardware buffer receiver.
 | HAL under `/vendor/lib64/hw/` | `vulkan.powervr.so` | `vulkan.samsung.so` | `vulkan.mali.so` |
 | DRM | Accessible, identifiable PowerVR render node | Accessible, identifiable `sgpu` render node | No DRM-node requirement or handle emulation |
 | Inner X11 presentation | Existing DRI3/Steam GL profile | Existing DRI3/Steam GL profile | Bundled X11 WSI with `WSI_X11_FORCE_SHM=1` |
+| Steam UI rendering | Software CEF; game graphics remain hardware accelerated | Existing GPU CEF path | Existing GPU CEF path |
 | Proton DXVK | Managed patched `dxvk` | Managed patched `dxvk-2.6.2` for 128-byte push constants | Managed experimental `dxvk-mali`, guarded to Mali-G715 driver 54.3.0 |
 | Session / game compatibility layers | compat / WSI + compat | compat / WSI + compat | compat / WSI + compat |
 | Session / managed-game BC emulation | Existing policy / `dxvk` | `0` / `dxvk` | Existing policy / `dxvk` |
@@ -32,6 +33,7 @@ with a managed DXVK payload, or native presentation with a user-selected payload
 | `DROIDDECK_SYSTEM_VULKAN_DXVK` | `managed` uses the runtime wrapper/payload; `user` preserves Proton/DXVK/WineD3D choices |
 | `DROIDDECK_HYBRIS_SESSION_LAYERS` | Outer/session layer list, restored before launching a nested Gamescope |
 | `DROIDDECK_HYBRIS_SESSION_BC_TEXTURES` | Optional outer/session BC policy, restored before nested compositors; Xclipse sets `0` |
+| `BL_STEAM_CEF_SOFTWARE` | `1` selects `-cef-disable-gpu` for Steam's UI; selected by the PowerVR profile only |
 
 `DROIDDECK_HYBRIS_LAYERS` separately specifies game compatibility layers;
 `DROIDDECK_HYBRIS_LAYER_PATH` adds their directory, and `DROIDDECK_HYBRIS_DXVK`
@@ -47,6 +49,23 @@ passes explicit `x11-shm`/`managed` fields for Mali Auto; those legacy defaults 
 not describe its current selection. The old
 `DROIDDECK_POWERVR_RUNTIME` alias remains available for PowerVR and Xclipse helpers.
 Manual driver selections retain their existing behavior.
+
+### PowerVR Steam UI containment
+
+The PowerVR profile selects software CEF rendering for Steam. A Pixel 11 Pro XL
+capture of rapid **All Games** scrolling identified `steamwebhelper` as the
+PowerVR `GEOM GUILTY_LOCKUP` client before a fatal GNOC reset. The precise failing
+graphics operation and the reset's initiating transaction remain unresolved.
+This policy removes Steam's forced GPU/ANGLE flags and selects `-cef-disable-gpu`.
+The launch log records `CEF software rendering selected (-cef-disable-gpu)`.
+
+The parent presentation environment is retained for native games, and Proton
+launches keep their managed WSI/DXVK path. No global Mesa software-rendering
+variable is set; Gamescope and the Android compositor still use the GPU. Mali
+and Xclipse keep their current Steam UI behavior. Software CEF may reduce UI
+performance; build/test success is not proof that the reboot is fixed. Device
+validation must repeat **All Games -> hold Down -> rapid scrolling**, including
+newly encountered artwork rather than only a small, already loaded page.
 
 ```text
 Android compositor
