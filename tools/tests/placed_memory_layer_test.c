@@ -2,11 +2,184 @@
  * Stub-driver tests compile the actual patched placed-memory layer.
  */
 #define _GNU_SOURCE
+#include <assert.h>
+#include <dlfcn.h>
 #include <errno.h>
+#include <inttypes.h>
+#include <stdio.h>
+#include <stdlib.h>
+#include <string.h>
+#include <sys/stat.h>
+#include <sys/sysmacros.h>
 #include <sys/mman.h>
 #include <unistd.h>
 static int fail_fixed_map, fail_reserve_map, layer_closes;
+static int have_mapping_begin = 1, have_mapping_end = 1, fallback_mapping_api;
+static int mapping_lock_depth, fail_mapping_begin, mapping_attempt;
+static int replace_target_on_begin;
+static unsigned mapping_begins, mapping_ends;
+static void replace_target_during_begin(void);
+static int mock_mapping_begin(void) {
+    if (fail_mapping_begin) { fail_mapping_begin = 0; return EBUSY; }
+    mapping_lock_depth++;
+    mapping_begins++;
+    if (replace_target_on_begin) {
+        replace_target_on_begin = 0;
+        replace_target_during_begin();
+    }
+    return 0;
+}
+static void mock_mapping_end(void) {
+    assert(mapping_lock_depth > 0);
+    mapping_lock_depth--;
+    mapping_ends++;
+}
+static void *test_dlopen(const char *name, int flags) {
+    assert(!strcmp(name, "libhybris-common.so.1") && (flags & RTLD_NOLOAD));
+    return (void *)0x1234;
+}
+static void *test_dlsym(void *handle, const char *name) {
+    assert(handle == RTLD_DEFAULT || handle == (void *)0x1234);
+    if (fallback_mapping_api && handle == RTLD_DEFAULT) return NULL;
+    if (!strcmp(name, "hybris_mali_mapping_begin"))
+        return have_mapping_begin ? (void *)mock_mapping_begin : NULL;
+    if (!strcmp(name, "hybris_mali_mapping_end"))
+        return have_mapping_end ? (void *)mock_mapping_end : NULL;
+    assert(!"unexpected dynamic symbol lookup");
+    return NULL;
+}
+static void assert_mapping_transaction(void) {
+    if (!mapping_attempt) return;
+    assert(mapping_lock_depth == 1);
+    /* Mapping hooks can re-enter the common lock on this same thread. The
+     * separate common-hook suite verifies the real recursive mutex itself. */
+    assert(!mock_mapping_begin() && mapping_lock_depth == 2);
+    mock_mapping_end();
+    assert(mapping_lock_depth == 1);
+}
+/* Model kbase's top-down, NULL-address-only mmap selection. Never reserve the
+ * host's address space merely to test the guard algorithm. Native allocations
+ * still use real memfd mappings below, outside these layer-only wrappers. */
+enum vma_kind { RESERVATION, UNRELATED, GUARD, ALIAS, PROBE };
+struct modeled_vma { uintptr_t start, end; enum vma_kind kind; int protection; };
+static struct modeled_vma modeled[64];
+static unsigned modeled_count;
+static int model_enabled, model_gpu_fd = -1, model_extra_fd = -1;
+static void *model_native;
+static size_t model_length;
+static const uintptr_t model_target = 0x21010000, model_limit = 0x6000000000ull;
+static const off_t model_offset = 0x5000000000ull;
+static int model_released, fail_guard, fail_chunk, wrong_chunk, race_restore;
+static int model_target_protection, model_target_shared, model_target_file;
+static unsigned guard_calls, chunk_calls;
+static off_t chunk_offsets[16];
+static size_t chunk_lengths[16];
+static int modeled_fd(int fd) {
+    struct stat a, b;
+    return model_enabled && model_gpu_fd >= 0 && !fstat(fd, &a) &&
+           !fstat(model_gpu_fd, &b) && a.st_dev == b.st_dev && a.st_ino == b.st_ino;
+}
+static void model_add(uintptr_t start, size_t length, enum vma_kind kind) {
+    assert(length && start <= UINTPTR_MAX - length && modeled_count < 64);
+    unsigned at = 0;
+    while (at < modeled_count && modeled[at].start < start)
+        at++;
+    assert(!at || modeled[at - 1].end <= start);
+    assert(at == modeled_count || start + length <= modeled[at].start);
+    memmove(&modeled[at + 1], &modeled[at], (modeled_count - at) * sizeof(modeled[0]));
+    int protection = kind == RESERVATION ? model_target_protection :
+                     kind == GUARD ? PROT_NONE : PROT_READ | PROT_WRITE;
+    modeled[at] = (struct modeled_vma){start, start + length, kind, protection};
+    modeled_count++;
+}
+static void replace_target_during_begin(void) {
+    for (unsigned i = 0; i < modeled_count; i++)
+        if (modeled[i].start == model_target && modeled[i].end == model_target + model_length &&
+            modeled[i].kind == RESERVATION) {
+            modeled[i].kind = UNRELATED;
+            return;
+        }
+    assert(!"target reservation missing during lock acquisition");
+}
+static int model_overlap(uintptr_t start, size_t length) {
+    for (unsigned i = 0; i < modeled_count; i++)
+        if (start < modeled[i].end && modeled[i].start < start + length)
+            return 1;
+    return 0;
+}
+static int test_munmap(void *pointer, size_t length) {
+    uintptr_t start = (uintptr_t)pointer, end = start + length;
+    if (model_enabled && model_native) {
+        uintptr_t original = (uintptr_t)model_native;
+        /* Only the native UnmapMemory callback may release this mapping. */
+        assert(end <= original || start >= original + model_length);
+    }
+    if (!model_enabled || start < 2 * 1024 * 1024 || end > model_limit)
+        return munmap(pointer, length);
+    assert_mapping_transaction();
+    for (unsigned i = 0; i < modeled_count;) {
+        struct modeled_vma old = modeled[i];
+        if (old.end <= start || old.start >= end) { i++; continue; }
+        /* Any unmap of unrelated address space is an ownership violation. */
+        assert(old.kind != UNRELATED);
+        assert(start <= old.start && end >= old.end);
+        memmove(&modeled[i], &modeled[i + 1], (--modeled_count - i) * sizeof(modeled[0]));
+    }
+    if (start == model_target && length == model_length)
+        model_released = 1;
+    return 0;
+}
 static void *test_mmap(void *a, size_t n, int p, int flags, int fd, off_t o) {
+    if (model_enabled && fd < 0 && (flags & (MAP_FIXED | MAP_FIXED_NOREPLACE))) {
+        assert_mapping_transaction();
+        uintptr_t start = (uintptr_t)a;
+        assert(flags & MAP_ANONYMOUS);
+        assert(start == model_target || p == PROT_NONE);
+        if (start != model_target && ++guard_calls == (unsigned)fail_guard) {
+            errno = ENOMEM;
+            return MAP_FAILED;
+        }
+        if ((flags & MAP_FIXED_NOREPLACE) && model_overlap(start, n)) {
+            errno = EEXIST;
+            return MAP_FAILED;
+        }
+        if (flags & MAP_FIXED) {
+            if (fail_reserve_map) { errno = ENOMEM; return MAP_FAILED; }
+            assert(!test_munmap(a, n));
+        }
+        model_add(start, n, start == model_target ? RESERVATION : GUARD);
+        for (unsigned i = 0; i < modeled_count; i++)
+            if (modeled[i].start == start) modeled[i].protection = p;
+        return a;
+    }
+    if (modeled_fd(fd)) {
+        assert_mapping_transaction();
+        assert(!a && flags == MAP_SHARED && p == (PROT_READ | PROT_WRITE));
+        if (model_released) {
+            assert(chunk_calls < 16);
+            chunk_offsets[chunk_calls] = o;
+            chunk_lengths[chunk_calls++] = n;
+            if (chunk_calls == (unsigned)fail_chunk) {
+                if (race_restore) model_add(model_target, 4096, UNRELATED);
+                errno = ENOMEM;
+                return MAP_FAILED;
+            }
+            if (chunk_calls == (unsigned)wrong_chunk) {
+                model_add(0x10000000, n, ALIAS);
+                return (void *)0x10000000;
+            }
+        }
+        uintptr_t top = model_limit;
+        for (unsigned i = modeled_count; i; i--) {
+            struct modeled_vma v = modeled[i - 1];
+            if (v.start >= top) continue;
+            if (v.end <= top && top - v.end >= n) break;
+            top = v.start;
+        }
+        assert(top >= 2 * 1024 * 1024 + n);
+        model_add(top - n, n, model_released ? ALIAS : PROBE);
+        return (void *)(top - n);
+    }
     if ((fail_fixed_map && fd >= 0 && (flags & MAP_FIXED)) ||
         (fail_reserve_map && (flags & MAP_FIXED) && p == PROT_NONE)) {
         errno = ENOMEM;
@@ -14,14 +187,76 @@ static void *test_mmap(void *a, size_t n, int p, int flags, int fd, off_t o) {
     }
     return mmap(a, n, p, flags, fd, o);
 }
+static FILE *test_fopen(const char *path, const char *mode) {
+    if (!model_enabled || strcmp(path, "/proc/self/maps"))
+        return fopen(path, mode);
+    FILE *f = tmpfile();
+    assert(f);
+    for (unsigned i = 0; i < modeled_count; i++) {
+        const struct modeled_vma *v = &modeled[i];
+        int target = v->kind == RESERVATION && v->start == model_target;
+        int foreign_target = v->kind == UNRELATED && v->start == model_target;
+        char perms[] = "---p";
+        if (v->protection & PROT_READ) perms[0] = 'r';
+        if (v->protection & PROT_WRITE) perms[1] = 'w';
+        if (v->protection & PROT_EXEC) perms[2] = 'x';
+        if (target && model_target_shared) perms[3] = 's';
+        fprintf(f, "%" PRIxPTR "-%" PRIxPTR " %s 00000000 %s %d%s\n", v->start, v->end,
+                perms, (target && model_target_file) || foreign_target ? "01:03" : "00:00",
+                (target && model_target_file) || foreign_target ? 123 : 0,
+                (target && model_target_file) || foreign_target ? " /some/file" : "");
+    }
+    if (model_native) {
+        /* Deliberately put the returned pointer one page into its VMA. */
+        uintptr_t start = (uintptr_t)model_native - 4096;
+        assert(start > model_limit);
+        fprintf(f, "%" PRIxPTR "-%" PRIxPTR " rw-s %llx 01:02 4242 /dev/mali0\n",
+                start, start + model_length + 8192, (unsigned long long)model_offset);
+    }
+    rewind(f);
+    return f;
+}
+static ssize_t test_readlink(const char *path, char *buffer, size_t size) {
+    int fd = -1;
+    if (model_enabled && sscanf(path, "/proc/self/fd/%d", &fd) == 1 && modeled_fd(fd)) {
+        const char name[] = "/dev/mali0";
+        size_t n = sizeof(name) - 1;
+        if (n > size) n = size;
+        memcpy(buffer, name, n);
+        return (ssize_t)n;
+    }
+    return readlink(path, buffer, size);
+}
+static int test_fstat(int fd, struct stat *st) {
+    int result = fstat(fd, st);
+    if (!result && modeled_fd(fd)) {
+        st->st_dev = makedev(1, 2);
+        st->st_ino = 4242;
+    }
+    return result;
+}
 static int test_close(int fd) {
+    if (model_enabled)
+        assert(fd != model_gpu_fd && fd != model_extra_fd);
     layer_closes++;
     return close(fd);
 }
 #define mmap test_mmap
+#define munmap test_munmap
+#define fopen test_fopen
+#define readlink test_readlink
+#define fstat test_fstat
+#define dlopen test_dlopen
+#define dlsym test_dlsym
 #define close test_close
 #include "placed_layer.c"
 #undef mmap
+#undef munmap
+#undef fopen
+#undef readlink
+#undef fstat
+#undef dlopen
+#undef dlsym
 #undef close
 #include <assert.h>
 #include <fcntl.h>
@@ -40,6 +275,7 @@ static VkPhysicalDevice P = (VkPhysicalDevice)&ph;
 static VkDevice D = (VkDevice)&dh;
 static _Atomic unsigned allocs, frees, native_maps, native_unmaps, driver_frees;
 static int fail_native_map, short_fd, expect_filtered, explicit_failures, have_native_placed;
+static int mali_mode;
 static _Atomic VkExternalMemoryHandleTypeFlags last_export;
 struct native_memory {
     int fd;
@@ -93,6 +329,13 @@ static VkResult VKAPI_CALL ne(VkPhysicalDevice p, const char *layer, uint32_t *n
 }
 static void VKAPI_CALL np(VkPhysicalDevice p, VkPhysicalDeviceMemoryProperties *out) {
     assert(p == P);
+    if (mali_mode) {
+        *out = (VkPhysicalDeviceMemoryProperties){.memoryTypeCount = 2, .memoryHeapCount = 1};
+        out->memoryTypes[0].propertyFlags = VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT | HOST | COHERENT;
+        out->memoryTypes[1].propertyFlags =
+            VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT | HOST | VK_MEMORY_PROPERTY_HOST_CACHED_BIT;
+        return;
+    }
     *out = (VkPhysicalDeviceMemoryProperties){.memoryTypeCount = 3, .memoryHeapCount = 1};
     out->memoryTypes[0].propertyFlags = VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT;
     out->memoryTypes[1].propertyFlags = HOST | COHERENT;
@@ -105,10 +348,20 @@ static void VKAPI_CALL nf(VkPhysicalDevice p, VkPhysicalDeviceFeatures2 *out) {
 static void VKAPI_CALL nprop(VkPhysicalDevice p, VkPhysicalDeviceProperties2 *out) {
     assert(p == P);
     out->properties.apiVersion = VK_API_VERSION_1_3;
+    out->properties.vendorID = mali_mode == 1 ? 0x13b5 : 0;
+}
+static void VKAPI_CALL nprop1(VkPhysicalDevice p, VkPhysicalDeviceProperties *out) {
+    VkPhysicalDeviceProperties2 props = {.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_PROPERTIES_2};
+    nprop(p, &props);
+    *out = props.properties;
 }
 static void VKAPI_CALL nbprops(VkPhysicalDevice p, const VkPhysicalDeviceExternalBufferInfo *in,
                                VkExternalBufferProperties *out) {
     assert(p == P && in->handleType == OPAQUE);
+    if (mali_mode) {
+        out->externalMemoryProperties = (VkExternalMemoryProperties){0};
+        return;
+    }
     out->externalMemoryProperties = (VkExternalMemoryProperties){
         .externalMemoryFeatures =
             VK_EXTERNAL_MEMORY_FEATURE_EXPORTABLE_BIT | VK_EXTERNAL_MEMORY_FEATURE_IMPORTABLE_BIT,
@@ -207,7 +460,8 @@ static void VKAPI_CALL ndimage(VkDevice h, VkImage r, const VkAllocationCallback
     free(r);
 }
 static void req(VkMemoryRequirements *out) {
-    *out = (VkMemoryRequirements){.size = 4096, .alignment = 4096, .memoryTypeBits = 7};
+    *out = (VkMemoryRequirements){.size = 4096, .alignment = 4096,
+                                  .memoryTypeBits = mali_mode ? 3 : 7};
 }
 static void VKAPI_CALL nbr(VkDevice h, VkBuffer b, VkMemoryRequirements *out) {
     assert(h == D && b);
@@ -244,6 +498,7 @@ static VkResult VKAPI_CALL na(VkDevice h, const VkMemoryAllocateInfo *ci,
     m->fd = memfd_create("layer-test", MFD_CLOEXEC);
     assert(m->fd >= 0);
     assert(!ftruncate(m->fd, m->size));
+    if (model_enabled) model_gpu_fd = m->fd;
     const VkExportMemoryAllocateInfo *e =
         (void *)find_chain(ci->pNext, VK_STRUCTURE_TYPE_EXPORT_MEMORY_ALLOCATE_INFO);
     last_export = e ? e->handleTypes : 0;
@@ -264,6 +519,7 @@ static void VKAPI_CALL nfree(VkDevice h, VkDeviceMemory handle, const VkAllocati
 static VkResult VKAPI_CALL nm(VkDevice h, VkDeviceMemory handle, VkDeviceSize offset,
                               VkDeviceSize size, VkMemoryMapFlags flags, void **out) {
     assert(h == D && !flags && !offset);
+    assert(!mapping_lock_depth);
     struct native_memory *m = (void *)handle;
     assert(size == VK_WHOLE_SIZE || size == m->size);
     assert(!m->map);
@@ -272,15 +528,18 @@ static VkResult VKAPI_CALL nm(VkDevice h, VkDeviceMemory handle, VkDeviceSize of
     m->map = mmap(NULL, m->size, PROT_READ | PROT_WRITE, MAP_SHARED, m->fd, 0);
     assert(m->map != MAP_FAILED);
     *out = m->map;
+    if (model_enabled) model_native = m->map;
     native_maps++;
     return VK_SUCCESS;
 }
 static void VKAPI_CALL nu(VkDevice h, VkDeviceMemory handle) {
     assert(h == D);
+    assert(!mapping_lock_depth);
     struct native_memory *m = (void *)handle;
     assert(m->map);
     assert(!munmap(m->map, m->size));
     m->map = NULL;
+    if (model_enabled) model_native = NULL;
     native_unmaps++;
 }
 static VkResult VKAPI_CALL nfd(VkDevice h, const VkMemoryGetFdInfoKHR *in, int *out) {
@@ -321,6 +580,7 @@ static PFN_vkVoidFunction VKAPI_CALL ngipa(VkInstance h, const char *n) {
     N("CreateInstance", nci)
     N("DestroyInstance", ndi) N("CreateDevice", ncd) N("EnumerateDeviceExtensionProperties", ne)
         N("GetPhysicalDeviceMemoryProperties", np) N("GetPhysicalDeviceFeatures2", nf)
+            N("GetPhysicalDeviceProperties", nprop1)
             N("GetPhysicalDeviceFeatures2KHR", nf) N("GetPhysicalDeviceProperties2", nprop)
                 N("GetPhysicalDeviceProperties2KHR", nprop)
                     N("GetPhysicalDeviceExternalBufferProperties", nbprops)
@@ -568,11 +828,249 @@ static void test_concurrency(void) {
     puts("PASS concurrency: 128 concurrent allocations/frees, reused device keys, unknown/import "
          "allocation chains fail closed");
 }
-int main(void) {
+static void reset_model(void) {
+    modeled_count = guard_calls = chunk_calls = 0;
+    model_released = fail_guard = fail_chunk = wrong_chunk = race_restore = 0;
+    model_length = 2 * 1024 * 1024 + 65536;
+    model_target_protection = PROT_READ | PROT_WRITE;
+    model_target_shared = model_target_file = 0;
+    model_native = NULL;
+    model_gpu_fd = model_extra_fd = -1;
+    model_add(model_target, model_length, RESERVATION);
+    model_add(0x30000000, 4096, UNRELATED);
+}
+static void assert_model_clean(int raced, int protection) {
+    assert(modeled_count == 2);
+    assert(modeled[0].start == model_target);
+    assert(modeled[0].end == model_target + (raced ? 4096 : model_length));
+    assert(modeled[0].kind == (raced ? UNRELATED : RESERVATION));
+    assert(modeled[0].protection == protection);
+    assert(modeled[1].start == 0x30000000 && modeled[1].kind == UNRELATED);
+    assert(!model_native);
+}
+static VkDeviceMemory allocate_mali(void) {
+    VkMemoryAllocateInfo ci = {.sType = VK_STRUCTURE_TYPE_MEMORY_ALLOCATE_INFO,
+                               .allocationSize = model_length, .memoryTypeIndex = 0};
+    VkDeviceMemory m;
+    assert(l_AllocateMemory(D, &ci, &callbacks, &m) == VK_SUCCESS);
+    assert(!last_export && get_memory(get_device(D), m)->exportable);
+    return m;
+}
+static VkResult map_mali(VkDeviceMemory memory, void **out) {
+    VkMemoryMapPlacedInfoEXT placed = {.sType = VK_STRUCTURE_TYPE_MEMORY_MAP_PLACED_INFO_EXT,
+                                      .pPlacedAddress = (void *)model_target};
+    VkMemoryMapInfoKHR map = {.sType = VK_STRUCTURE_TYPE_MEMORY_MAP_INFO_KHR, .pNext = &placed,
+                              .flags = VK_MEMORY_MAP_PLACED_BIT_EXT, .memory = memory,
+                              .size = VK_WHOLE_SIZE};
+    mapping_attempt = 1;
+    VkResult result = l_MapMemory2KHR(D, &map, out);
+    mapping_attempt = 0;
+    assert(!mapping_lock_depth && mapping_begins == mapping_ends);
+    return result;
+}
+static void test_mali_resources(void) {
+    mali_mode = 1;
+    setup(0);
+    create_device(0);
+    assert(l_GetDeviceProcAddr(D, "vkCreateImage") == (PFN_vkVoidFunction)nai);
+    teardown();
+    have_native_placed = 1;
+    setup(1);
+    create_device(0);
+    assert(l_GetDeviceProcAddr(D, "vkCreateImage") == (PFN_vkVoidFunction)nai);
+    teardown();
+    have_native_placed = 0;
+    setup(1);
+    create_device(1);
+    assert(get_device(D)->backend == BACKEND_NATIVE_ALIAS);
+    assert(get_device(D)->props.memoryTypeCount == 2);
+    assert(get_device(D)->props.memoryTypes[0].propertyFlags == 7);
+    assert(get_device(D)->props.memoryTypes[1].propertyFlags == 11);
+    VkImageCreateInfo ci = {.sType = VK_STRUCTURE_TYPE_IMAGE_CREATE_INFO,
+                            .flags = VK_IMAGE_CREATE_MUTABLE_FORMAT_BIT,
+                            .imageType = VK_IMAGE_TYPE_2D, .format = VK_FORMAT_B8G8R8A8_UNORM,
+                            .extent = {1602, 720, 1}, .mipLevels = 1, .arrayLayers = 1,
+                            .samples = VK_SAMPLE_COUNT_4_BIT, .tiling = VK_IMAGE_TILING_OPTIMAL,
+                            .usage = VK_IMAGE_USAGE_COLOR_ATTACHMENT_BIT |
+                                     VK_IMAGE_USAGE_SAMPLED_BIT};
+    VkImage img;
+    assert(l_CreateImage(D, &ci, &callbacks, &img) == VK_SUCCESS);
+    assert(!((struct native_resource *)img)->external);
+    VkMemoryRequirements requirements;
+    l_GetImageMemoryRequirements(D, img, &requirements);
+    assert(requirements.memoryTypeBits == 3);
+    VkImageMemoryRequirementsInfo2 ii = {
+        .sType = VK_STRUCTURE_TYPE_IMAGE_MEMORY_REQUIREMENTS_INFO_2, .image = img};
+    VkMemoryRequirements2 r2 = {.sType = VK_STRUCTURE_TYPE_MEMORY_REQUIREMENTS_2};
+    l_GetImageMemoryRequirements2(D, &ii, &r2);
+    assert(r2.memoryRequirements.memoryTypeBits == 3);
+    VkDeviceImageMemoryRequirements di = {
+        .sType = VK_STRUCTURE_TYPE_DEVICE_IMAGE_MEMORY_REQUIREMENTS, .pCreateInfo = &ci};
+    l_GetDeviceImageMemoryRequirements(D, &di, &r2);
+    assert(r2.memoryRequirements.memoryTypeBits == 3);
+    l_DestroyImage(D, img, &callbacks);
+    VkBufferCreateInfo bc = {.sType = VK_STRUCTURE_TYPE_BUFFER_CREATE_INFO, .size = 4096,
+                             .usage = VK_BUFFER_USAGE_TRANSFER_SRC_BIT};
+    VkBuffer buffer;
+    assert(l_CreateBuffer(D, &bc, &callbacks, &buffer) == VK_SUCCESS);
+    assert(!((struct native_resource *)buffer)->external);
+    l_GetBufferMemoryRequirements(D, buffer, &requirements);
+    assert(requirements.memoryTypeBits == 3);
+    l_DestroyBuffer(D, buffer, &callbacks);
+    VkBaseInStructure imported = {
+        .sType = VK_STRUCTURE_TYPE_IMPORT_ANDROID_HARDWARE_BUFFER_INFO_ANDROID};
+    VkMemoryAllocateInfo alloc = {.sType = VK_STRUCTURE_TYPE_MEMORY_ALLOCATE_INFO,
+                                  .pNext = &imported, .allocationSize = 4096,
+                                  .memoryTypeIndex = 0};
+    VkDeviceMemory memory;
+    assert(l_AllocateMemory(D, &alloc, &callbacks, &memory) == VK_SUCCESS);
+    assert(!last_export && !get_memory(get_device(D), memory)->exportable);
+    void *out = NULL;
+    unsigned before = native_maps;
+    assert(map_mali(memory, &out) == VK_ERROR_MEMORY_MAP_FAILED && native_maps == before);
+    l_FreeMemory(D, memory, &callbacks);
+    teardown();
+    mali_mode = 0;
+    puts("PASS mali resources: native unified types and mutable MSAA image preserved, no external "
+         "memory injection, imported allocations excluded, opt-out/native placed unchanged");
+}
+static void test_mali_placement(void) {
+    mali_mode = model_enabled = 1;
+    setup(1);
+    create_device(1);
+    reset_model();
+    VkDeviceMemory memory = allocate_mali();
+    void *out = NULL;
+    assert(map_mali(memory, &out) == VK_SUCCESS && out == (void *)model_target);
+    assert(chunk_calls == 3 && guard_calls == 2);
+    assert(chunk_lengths[0] == 1024 * 1024 && chunk_lengths[1] == 1024 * 1024 &&
+           chunk_lengths[2] == 65536);
+    assert(chunk_offsets[0] == model_offset + 4096 + 1024 * 1024 + 65536);
+    assert(chunk_offsets[1] == model_offset + 4096 + 65536);
+    assert(chunk_offsets[2] == model_offset + 4096);
+    assert(model_native == ((struct native_memory *)memory)->map);
+    assert(modeled_count == 4); /* Three alias chunks and unrelated VMA; guards/probes gone. */
+    assert(map_mali(memory, &out) == VK_ERROR_MEMORY_MAP_FAILED);
+    VkMemoryUnmapInfoKHR unmap = {.sType = VK_STRUCTURE_TYPE_MEMORY_UNMAP_INFO_KHR,
+                                 .memory = memory, .flags = VK_MEMORY_UNMAP_RESERVE_BIT_EXT};
+    fail_reserve_map = 1;
+    assert(l_UnmapMemory2KHR(D, &unmap) == VK_ERROR_MEMORY_MAP_FAILED && model_native);
+    fail_reserve_map = 0;
+    assert(l_UnmapMemory2KHR(D, &unmap) == VK_SUCCESS);
+    assert_model_clean(0, PROT_NONE);
+    /* A completed placement must not leave a duplicate descriptor that looks
+     * like a second Mali context on the next placement. */
+    assert(get_memory(get_device(D), memory)->fd == -1);
+    model_released = 0;
+    guard_calls = chunk_calls = 0;
+    assert(map_mali(memory, &out) == VK_SUCCESS && out == (void *)model_target);
+    assert(chunk_calls == 3 && get_memory(get_device(D), memory)->fd == -1);
+    assert(l_UnmapMemory2KHR(D, &unmap) == VK_SUCCESS);
+    assert_model_clean(0, PROT_NONE);
+    l_FreeMemory(D, memory, &callbacks);
+    assert_model_clean(0, PROT_NONE);
+
+    /* All failures must unwind owned aliases/guards without touching the
+     * original driver VMA or a concurrent thread's replacement mapping. */
+    for (int failure = 0; failure < 10; failure++) {
+        reset_model();
+        if (failure == 6) {
+            model_target_protection |= PROT_EXEC;
+            modeled[0].protection = model_target_protection;
+        }
+        memory = allocate_mali();
+        if (failure == 0) fail_guard = 2;
+        if (failure == 1) fail_chunk = 2;
+        if (failure == 2) wrong_chunk = 2;
+        if (failure == 3) model_extra_fd = dup(model_gpu_fd);
+        if (failure == 4) fail_native_map = 1;
+        if (failure == 5) { fail_chunk = 2; race_restore = 1; }
+        if (failure == 6) fail_chunk = 2;
+        if (failure == 7) model_target_shared = 1;
+        if (failure == 8) model_target_file = 1;
+        if (failure == 9) fail_mapping_begin = 1;
+        unsigned before = native_unmaps;
+        assert(map_mali(memory, &out) == VK_ERROR_MEMORY_MAP_FAILED);
+        assert(native_unmaps == before + (failure != 4 && (failure < 7 || failure == 9)));
+        assert(!get_memory(get_device(D), memory)->native);
+        assert(!get_memory(get_device(D), memory)->alias);
+        assert_model_clean(failure == 5, model_target_protection);
+        if (model_extra_fd >= 0) close(model_extra_fd);
+        fail_native_map = 0;
+        l_FreeMemory(D, memory, &callbacks);
+    }
+    /* The driver map happens before the common mapping lock is acquired. If a
+     * hooked mapper replaces the target while begin waits, the under-lock
+     * ownership check must reject it without releasing the foreign mapping. */
+    reset_model();
+    memory = allocate_mali();
+    replace_target_on_begin = 1;
+    unsigned before = native_unmaps;
+    assert(map_mali(memory, &out) == VK_ERROR_MEMORY_MAP_FAILED);
+    assert(native_unmaps == before + 1 && !model_released && !guard_calls && !chunk_calls);
+    assert(modeled_count == 2 && modeled[0].start == model_target &&
+           modeled[0].end == model_target + model_length && modeled[0].kind == UNRELATED);
+    assert(!get_memory(get_device(D), memory)->native && !model_native);
+    l_FreeMemory(D, memory, &callbacks);
+    /* A plain reservation and Wine's optional executable anonymous mapping
+     * are valid placed targets too. Reserve-unmap deliberately yields NONE. */
+    for (int executable = 0; executable < 2; executable++) {
+        reset_model();
+        model_target_protection = executable ? PROT_READ | PROT_WRITE | PROT_EXEC : PROT_NONE;
+        modeled[0].protection = model_target_protection;
+        memory = allocate_mali();
+        assert(map_mali(memory, &out) == VK_SUCCESS);
+        unmap.memory = memory;
+        assert(l_UnmapMemory2KHR(D, &unmap) == VK_SUCCESS);
+        assert_model_clean(0, PROT_NONE);
+        l_FreeMemory(D, memory, &callbacks);
+    }
+    model_enabled = 0;
+    teardown();
+    mali_mode = 0;
+    assert(native_maps == native_unmaps);
+    assert(mapping_begins && mapping_begins == mapping_ends && !mapping_lock_depth);
+    puts("PASS mali placement: Wine RW/RWX targets, failure protection restoration, "
+         "exact 64K-aligned target, descending bounded chunks and offsets, "
+         "guard/partial/wrong-address rollback, ambiguous fd rejection, concurrent VA preserved");
+}
+static void test_missing_mapping_api(void) {
+    mali_mode = 1;
+    setup(1);
+    uint32_t count = 0;
+    assert(l_EnumerateDeviceExtensionProperties(P, NULL, &count, NULL) == VK_SUCCESS);
+    assert(count == 1);
+    VkPhysicalDeviceMapMemoryPlacedFeaturesEXT placed = {
+        .sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_MAP_MEMORY_PLACED_FEATURES_EXT};
+    VkPhysicalDeviceFeatures2 features = {.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_FEATURES_2,
+                                         .pNext = &placed};
+    l_GetPhysicalDeviceFeatures2(P, &features);
+    assert(!placed.memoryMapPlaced && !placed.memoryUnmapReserve);
+    create_device(0);
+    assert(l_GetDeviceProcAddr(D, "vkCreateImage") == (PFN_vkVoidFunction)nai);
+    assert(!l_GetDeviceProcAddr(D, "vkMapMemory2KHR"));
+    teardown();
+    mali_mode = 0;
+    assert(!mapping_begins && !mapping_ends);
+    puts("PASS missing mapping API: Mali placement disabled, PowerVR unaffected");
+}
+int main(int argc, char **argv) {
+    if (argc == 2) {
+        if (!strcmp(argv[1], "--missing-begin")) have_mapping_begin = 0;
+        else if (!strcmp(argv[1], "--missing-end")) have_mapping_end = 0;
+        else if (!strcmp(argv[1], "--fallback-api")) fallback_mapping_api = 1;
+        else assert(!"unexpected test mode");
+    } else assert(argc == 1);
     test_dispatch();
     test_resources();
     test_mapping();
     test_concurrency();
+    if (!have_mapping_begin || !have_mapping_end) {
+        test_missing_mapping_api();
+        return 0;
+    }
+    test_mali_resources();
+    test_mali_placement();
     assert(explicit_failures == 1);
     printf(
         "PASS total: callback allocations=%u frees=%u native_maps=%u unmaps=%u driver_frees=%u\n",

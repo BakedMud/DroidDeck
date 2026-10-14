@@ -71,11 +71,21 @@ class PlacedMemoryLayerTest(unittest.TestCase):
             common = [compiler, "-std=gnu11", "-Wall", "-Wextra", "-Werror", "-pthread",
                       "-I", str(include), "-I", str(source)]
             program = directory / "placed-memory-test"
-            self.checked([*common, str(HELPER), "-o", str(program)])
+            self.checked([*common, str(HELPER), "-o", str(program), "-ldl"])
             ran = self.checked([str(program)])
             for contract in ("PASS dispatch:", "PASS resources:", "PASS mapping:",
-                             "PASS concurrency:", "PASS total:"):
+                             "PASS concurrency:", "PASS mali resources:",
+                             "PASS mali placement:", "PASS total:"):
                 self.assertIn(contract, ran.stdout)
+            # Symbol lookup is cached for the process lifetime. Separate
+            # processes exercise each availability contract without resetting
+            # private implementation state between cases.
+            fallback = self.checked([str(program), "--fallback-api"])
+            self.assertIn("PASS mali placement:", fallback.stdout)
+            for option in ("--missing-begin", "--missing-end"):
+                missing = self.checked([str(program), option])
+                self.assertIn("PASS missing mapping API:", missing.stdout)
+                self.assertIn("PASS mapping:", missing.stdout)
 
             # Verify the actual DSO name and loader negotiation export too.
             # Include-based driver tests alone cannot exercise this linkage.
@@ -84,7 +94,7 @@ class PlacedMemoryLayerTest(unittest.TestCase):
             library = directory / LAYER
             self.checked([*common, "-fPIC", "-shared", "-fvisibility=hidden",
                           "-Wl,--no-undefined", "-Wl,-Bsymbolic",
-                          str(source / "placed_layer.c"), "-o", str(library)])
+                          str(source / "placed_layer.c"), "-o", str(library), "-ldl"])
             loaded = ctypes.CDLL(str(library))
             self.assertIsNotNone(loaded.vkNegotiateLoaderLayerInterfaceVersion)
 

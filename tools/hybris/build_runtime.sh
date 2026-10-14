@@ -22,6 +22,12 @@ HYBRIS_VENDOR_SOURCE="$work/libhybris" python3 -m unittest discover \
   -s "$root/tools/tests" -p test_hybris_vendor_compat.py
 HYBRIS_PLACED_SOURCE="$work/libhybris" python3 -m unittest discover \
   -s "$root/tools/tests" -p test_placed_memory_layer.py
+python3 -m unittest discover \
+  -s "$root/tools/tests" -p test_hybris_mapping_lock.py
+python3 -m unittest discover \
+  -s "$root/tools/tests" -p test_hybris_inline_shader.py
+HYBRIS_CLIP_SOURCE="$work/libhybris" python3 -m unittest discover \
+  -s "$root/tools/tests" -p test_hybris_clip_shader.py
 git -C "$work/libhybris" apply --check "$root/tools/hybris/powervr-hal-version.patch"
 git -C "$work/libhybris" apply "$root/tools/hybris/powervr-hal-version.patch"
 for patch in "$root"/tools/hybris/patches/*.patch; do

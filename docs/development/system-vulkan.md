@@ -65,7 +65,7 @@ runs below `VK_LAYER_HYBRIS_compat`, so resources created by BC translation foll
 the same export policy. Steam, native Linux programs and 64-bit Windows programs
 retain their existing layer lists. Explicit driver overrides bypass automatic
 activation. Set `DROIDDECK_EXPERIMENTAL_PLACED_MEMORY=0` to disable it, or `1` to
-test the same path on another system-driver profile such as Mali.
+test another system-driver profile such as Mali.
 
 The layer keeps the native driver mapping for flush/invalidate operations and
 preserves Wine's reserved address on unmap. Buffers and images use matching
@@ -75,10 +75,48 @@ the layer does not force host-memory imports onto unsupported images. Native
 placed-memory support takes precedence, and unsupported explicit external-handle
 contracts fail rather than being silently rewritten.
 
+The experimental Mali backend retains ordinary native allocations and their real
+memory-type flags. On the tested G715, OPAQUE_FD export is unavailable and host
+imports cannot supply coherent memory. Instead, the layer aliases the native
+`/dev/mali` mapping at Wine's address, in descending chunks of at most 1 MiB.
+It accepts Wine's anonymous read/write reservations as well as inaccessible
+reservations, and preserves the native mapping for the driver's lifetime and
+cache operations.
+
+Mali placement requires the bundled libhybris mapping-lock API; older runtimes
+do not expose this backend. The lock serializes placement with Android driver
+`mmap`, `mmap64`, and `munmap` hooks, including driver worker threads, and survives
+fork. Guards occupy only free address ranges and never replace unrelated mappings.
+Target validation runs again under the lock before releasing Wine's reservation.
+This remains an explicit experiment for the tested G715/hybris stack: arbitrary
+raw syscalls, other mapping implementations, and other Mali generations have not
+been validated. Source changes require rebuilding and repinning the libhybris
+component before they are included in an APK.
+
+Pixel 8 Pro validation covered two coherent 8 MiB allocations at exact low
+addresses that are not 2 MiB aligned, GPU copies in both directions without
+explicit cache flushing, and reserve/remap lifetime. An adversarial driver-mapping
+test completed 100 placements with no reservation loss or data mismatches after
+adding the shared lock. With the inline-shader normalization below, Portal also
+reached a rendered main menu and loaded Test Chamber 00 on this Pixel 8 Pro
+(Mali-G715, driver 54.3.0). This was a brief launch check, not sustained gameplay.
+
+DXVK also supplies shaders inline through a stage's `VkShaderModuleCreateInfo`
+chain. The compatibility layer materializes supported inline shaders before
+feature conversion, so clip-distance emulation also covers this path. Without
+that normalization, Portal reaches device creation but sends unsupported clip
+outputs to the native G715 compiler. Temporary modules remain alive through
+pipeline creation and are released afterward; unsupported inline-module chains
+are rejected without being rewritten. Clip conversion preserves execution-mode ordering and
+reuses direct clip-distance output arrays, avoiding undeclared output locations
+when conservative cleanup leaves extension-bearing modules intact. All 84
+captured Portal shaders passed SPIR-V validation after conversion with scalar
+block layout enabled.
+
 Device validation on Pixel 11 Pro XL covered coherent and noncoherent shared
 mappings, reserve/remap lifetime, GPU buffer copies, normal and mutable image
 clears, and Portal reaching a rendered menu. Portal was also confirmed working
-by the user. Mali, other PowerVR drivers, and sustained gameplay/performance need
+by the user. Other Mali and PowerVR drivers, and sustained gameplay/performance need
 separate device validation. The original launch crash additionally required
 Steam to verify Proton Experimental: its installed Windows and Unix Vulkan
 modules used incompatible dispatch tables. This layer does not repair corrupt
