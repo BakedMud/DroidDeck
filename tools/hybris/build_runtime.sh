@@ -20,6 +20,8 @@ fetch https://github.com/taowen/arlinux-rootfs.git "$PROTOCOL_REVISION" "$work/r
 # pinned checkout explicitly so component CI cannot silently skip this gate.
 HYBRIS_VENDOR_SOURCE="$work/libhybris" python3 -m unittest discover \
   -s "$root/tools/tests" -p test_hybris_vendor_compat.py
+HYBRIS_PLACED_SOURCE="$work/libhybris" python3 -m unittest discover \
+  -s "$root/tools/tests" -p test_placed_memory_layer.py
 git -C "$work/libhybris" apply --check "$root/tools/hybris/powervr-hal-version.patch"
 git -C "$work/libhybris" apply "$root/tools/hybris/powervr-hal-version.patch"
 for patch in "$root"/tools/hybris/patches/*.patch; do
@@ -42,7 +44,8 @@ rm -rf "$work/package/lib/include" "$work/package/lib/pkgconfig" "$work/package/
 while IFS= read -r -d '' library; do
   patchelf --set-rpath '$ORIGIN:$ORIGIN/../..' "$library"
 done < <(find "$work/package/lib" -type f -name '*.so*' -print0)
-for library in libhybris-vulkan-icd.so.0 libhybris-common.so.1 libVkLayer_hybris_compat.so libhybris/linker/q.so; do
+for library in libhybris-vulkan-icd.so.0 libhybris-common.so.1 libVkLayer_hybris_compat.so \
+    libVkLayer_DROIDDECK_placed_memory.so VkLayer_DROIDDECK_placed_memory.json libhybris/linker/q.so; do
   test -s "$work/package/lib/$library"
 done
 cp "$work/libhybris"/LICENSE.* "$work/package/licenses/"

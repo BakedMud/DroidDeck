@@ -108,6 +108,7 @@ class SystemVulkanPruningTest {
         val components = listOf(
             "lib/libhybris-vulkan-icd.so.0", "lib/libhybris-common.so.1", "lib/libhybris/linker/q.so",
             "lib/libVkLayer_hybris_compat.so", "run-proton.py",
+            "lib/libVkLayer_DROIDDECK_placed_memory.so", "lib/VkLayer_DROIDDECK_placed_memory.json",
             "wsi/libVkLayer_window_system_integration.so", "wsi/VkLayer_window_system_integration.json",
         ) + listOf("x32", "x64").flatMap { arch ->
             listOf("d3d8", "d3d9", "d3d10core", "d3d11", "dxgi").map { "dxvk/$arch/$it.dll" }

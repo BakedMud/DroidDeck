@@ -76,6 +76,7 @@ def record(data, root, url, commit, run_url):
         content = runtime.read(entries, name)
         if content[:6] != b"\x7fELF\x02\x01" or content[18:20] != b"\xb7\x00":
             raise ValueError("component library is not ELF64 AArch64: " + name)
+    runtime.check_placed_manifest(entries)
     return {
         "url": url,
         "sha256": runtime.sha256(data),

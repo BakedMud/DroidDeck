@@ -28,9 +28,11 @@ ASSETS = Path("app/src/main/assets/hybris")
 REQUIRED_LIBRARIES = (
     "lib/libhybris-vulkan-icd.so.0", "lib/libhybris-common.so.1",
     "lib/libhybris/linker/q.so", "lib/libVkLayer_hybris_compat.so",
+    "lib/libVkLayer_DROIDDECK_placed_memory.so",
     "wsi/libVkLayer_window_system_integration.so",
 )
 MAX_UNPACKED = 256 * 1024 * 1024
+PLACED_MANIFEST = "lib/VkLayer_DROIDDECK_placed_memory.json"
 BUNDLED_LICENSES = {
     'tools/vulkan-wsi/licenses/Vulkan-Headers/' + name: 'licenses/Vulkan-Headers/' + name
     for name in ('LICENSE.md', 'MIT.txt')
@@ -247,6 +249,16 @@ def read_component(data, component):
     raise ValueError("unsupported component archive format: " + kind)
 
 
+def check_placed_manifest(entries):
+    manifest = json.loads(read(entries, PLACED_MANIFEST))
+    layer = manifest.get("layer") if isinstance(manifest, dict) else None
+    if (not isinstance(layer, dict)
+            or layer.get("name") != "VK_LAYER_DROIDDECK_placed_memory"
+            or layer.get("type") != "GLOBAL"
+            or layer.get("library_path") != "./libVkLayer_DROIDDECK_placed_memory.so"):
+        raise ValueError("invalid placed-memory layer manifest")
+
+
 def check_bundle(entries, release, root):
     check_tree(entries)
     if read(entries, "assembly-inputs.json") != json_bytes(assembly_inputs(root)):
@@ -274,6 +286,7 @@ def check_bundle(entries, release, root):
         content = read(entries, name)
         if content[:6] != b"\x7fELF\x02\x01" or content[18:20] != b"\xb7\x00":
             raise ValueError("runtime library is not ELF64 AArch64: " + name)
+    check_placed_manifest(entries)
     # Reuse the launcher's ARM64X verifier so assembly and launch enforce the same format.
     if any(name.startswith("dxvk-mali/") for name in entries):
         spec = importlib.util.spec_from_file_location("bundled_proton_validation", root / "tools/hybris/run-proton.py")

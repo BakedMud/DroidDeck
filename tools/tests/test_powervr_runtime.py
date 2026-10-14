@@ -102,6 +102,9 @@ class PowerVRRuntimeTest(unittest.TestCase):
             path.parent.mkdir(parents=True, exist_ok=True)
             path.write_bytes(content)
         bridge = {name: ('file', 0o755, elf()) for name in runtime.REQUIRED_LIBRARIES if name.startswith('lib/')}
+        bridge[runtime.PLACED_MANIFEST] = ('file', 0o644, runtime.json_bytes({'layer': {
+            'name': 'VK_LAYER_DROIDDECK_placed_memory', 'type': 'GLOBAL',
+            'library_path': './libVkLayer_DROIDDECK_placed_memory.so'}}))
         bridge['lib/libhybris-common.so.1.0.0'] = bridge.pop('lib/libhybris-common.so.1')
         bridge['lib/libhybris-common.so.1'] = ('symlink', 0o777, 'libhybris-common.so.1.0.0')
         data = runtime.pack(bridge)

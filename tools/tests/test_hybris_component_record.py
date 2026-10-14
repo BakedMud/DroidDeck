@@ -25,6 +25,9 @@ class HybrisComponentRecordTest(unittest.TestCase):
         self.entries = {name: ("file", 0o755, bytes(elf)) for name in component.runtime.REQUIRED_LIBRARIES
                         if name.startswith("lib/")}
         self.entries.update({
+            component.runtime.PLACED_MANIFEST: ("file", 0o644, component.runtime.json_bytes({"layer": {
+                "name": "VK_LAYER_DROIDDECK_placed_memory", "type": "GLOBAL",
+                "library_path": "./libVkLayer_DROIDDECK_placed_memory.so"}})),
             "source-commit": ("file", 0o644, b"source123\n"),
             "licenses/powervr.patch": ("file", 0o644, b"patched source"),
             "licenses/libhybris-source.tar.zst": ("file", 0o644, b"source archive"),
@@ -34,7 +37,8 @@ class HybrisComponentRecordTest(unittest.TestCase):
         self.manifest = {"source_commit": "source123", "compiler": "original compiler",
                          "build_inputs": {"source": "build snapshot"},
                          "elfs": [{"tree": "hybris", "path": name.removeprefix("lib/"), "sha256": "a" * 64}
-                                  for name in self.entries if name.startswith("lib/")]}
+                                  for name in self.entries if name.startswith("lib/")
+                                  and self.entries[name][2].startswith(b"\x7fELF")]}
         self.entries["build-manifest.json"] = ("file", 0o644, component.runtime.json_bytes(self.manifest))
         self.checksums()
 
@@ -105,6 +109,20 @@ class HybrisComponentRecordTest(unittest.TestCase):
         for url in ("file:///runtime.tzst", "http://example.com/runtime.tzst", "https:///runtime.tzst"):
             with self.subTest(url=url), self.assertRaisesRegex(ValueError, "must use HTTPS"):
                 self.record(url)
+
+    def test_requires_placed_layer_manifest_and_local_library(self):
+        name = component.runtime.PLACED_MANIFEST
+        del self.entries[name]
+        self.checksums()
+        with self.assertRaisesRegex(ValueError, "missing runtime file"):
+            self.record()
+        for library in ("/unmanaged/layer.so", "../layer.so", "./wrong-layer.so"):
+            self.entries[name] = ("file", 0o644, component.runtime.json_bytes({"layer": {
+                "name": "VK_LAYER_DROIDDECK_placed_memory", "type": "GLOBAL",
+                "library_path": library}}))
+            self.checksums()
+            with self.subTest(library=library), self.assertRaisesRegex(ValueError, "invalid placed-memory"):
+                self.record()
 
 
 if __name__ == "__main__":

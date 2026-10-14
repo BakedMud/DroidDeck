@@ -73,6 +73,7 @@ public final class SystemVulkanDriver {
     private static final String[] REQUIRED = {
         "lib/libhybris-vulkan-icd.so.0", "lib/libhybris-common.so.1",
         "lib/libhybris/linker/q.so", "lib/libVkLayer_hybris_compat.so",
+        "lib/libVkLayer_DROIDDECK_placed_memory.so", "lib/VkLayer_DROIDDECK_placed_memory.json",
         "run-proton.py", "wsi/libVkLayer_window_system_integration.so",
         "wsi/VkLayer_window_system_integration.json",
         "dxvk/x32/d3d8.dll", "dxvk/x32/d3d9.dll", "dxvk/x32/d3d10core.dll",
