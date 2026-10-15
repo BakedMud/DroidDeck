@@ -1,4 +1,5 @@
 import importlib.util
+import io
 import json
 import os
 from pathlib import Path
@@ -150,6 +151,52 @@ class PublicationBoundaryTests(unittest.TestCase):
                 with self.assertRaisesRegex(ValueError, "unexpected identity"):
                     control.verify_remote_assets("owner/repo", "graphics-test", [], {})
                 request.assert_not_called()
+
+    def test_public_verification_uses_canonical_tag_url_and_retries_unavailable_assets(self):
+        with tempfile.TemporaryDirectory() as temp:
+            asset = Path(temp) / "component.zip"
+            asset.write_bytes(b"verified bytes")
+            expected_url = "https://github.com/owner/repo/releases/download/graphics-test/component.zip"
+            for status in (404, 520):
+                pending = control.urllib.error.HTTPError(expected_url, status, "temporarily unavailable", {}, None)
+                with self.subTest(status=status), \
+                        patch.object(control.urllib.request, "urlopen", side_effect=[pending, io.BytesIO(asset.read_bytes())]) as download, \
+                        patch.object(control.time, "sleep") as sleep:
+                    control.verify_public_assets("owner/repo", "graphics-test", [asset])
+                    self.assertEqual(download.call_count, 2)
+                    for call in download.call_args_list:
+                        self.assertEqual(call.args[0].full_url, expected_url)
+                        self.assertIsNone(call.args[0].get_header("Authorization"))
+                    sleep.assert_called_once_with(2)
+
+    def test_public_checksum_mismatch_is_never_retried(self):
+        with tempfile.TemporaryDirectory() as temp:
+            asset = Path(temp) / "component.zip"
+            asset.write_bytes(b"expected")
+            with patch.object(control.urllib.request, "urlopen", return_value=io.BytesIO(b"different")) as download, \
+                    patch.object(control.time, "sleep") as sleep:
+                with self.assertRaisesRegex(ValueError, "bytes differ"):
+                    control.verify_public_assets("owner/repo", "graphics-test", [asset])
+                self.assertEqual(download.call_count, 1)
+                sleep.assert_not_called()
+
+    def test_public_authentication_failure_is_never_retried(self):
+        denied = control.urllib.error.HTTPError("https://github.com/", 403, "forbidden", {}, None)
+        with patch.object(control.urllib.request, "urlopen", side_effect=denied) as download, \
+                patch.object(control.time, "sleep") as sleep:
+            with self.assertRaises(control.urllib.error.HTTPError):
+                control.verify_public_assets("owner/repo", "graphics-test", [Path("component.zip")])
+            self.assertEqual(download.call_count, 1)
+            sleep.assert_not_called()
+
+    def test_public_availability_retries_are_bounded(self):
+        missing = control.urllib.error.HTTPError("https://github.com/", 404, "missing", {}, None)
+        with patch.object(control.urllib.request, "urlopen", side_effect=missing) as download, \
+                patch.object(control.time, "sleep") as sleep:
+            with self.assertRaises(control.urllib.error.HTTPError):
+                control.verify_public_assets("owner/repo", "graphics-test", [Path("component.zip")])
+            self.assertEqual(download.call_count, 6)
+            self.assertEqual([call.args[0] for call in sleep.call_args_list], [2, 5, 10, 20, 30])
 
     def test_bundle_tamper_and_extra_assets_rejected(self):
         with tempfile.TemporaryDirectory() as temp:

@@ -12,6 +12,8 @@ import re
 import shutil
 import subprocess
 import tempfile
+import time
+import urllib.error
 import urllib.parse
 import urllib.request
 
@@ -270,6 +272,35 @@ def verify_remote_assets(repo, tag, assets, env):
     return release
 
 
+def verify_public_assets(repo, tag, assets):
+    # Verify the URLs written into release-pin.json. A draft's download URLs can
+    # use an untagged name, and newly published assets may not be visible yet.
+    base = f"https://github.com/{repo}/releases/download/{urllib.parse.quote(tag, safe='')}"
+    delays = (0, 2, 5, 10, 20, 30)
+    for path in assets:
+        url = base + "/" + urllib.parse.quote(path.name, safe="")
+        for attempt, delay in enumerate(delays):
+            if delay:
+                time.sleep(delay)
+            request = urllib.request.Request(url, headers={"User-Agent": "DroidDeck-graphics-ci"})
+            try:
+                with urllib.request.urlopen(request, timeout=120) as stream:
+                    sha = hashlib.file_digest(stream, "sha256").hexdigest()
+            except urllib.error.HTTPError as error:
+                error.close()
+                retryable = error.code in (404, 408, 429) or 500 <= error.code < 600
+                if not retryable or attempt == len(delays) - 1:
+                    raise
+                continue
+            except (urllib.error.URLError, TimeoutError):
+                if attempt == len(delays) - 1:
+                    raise
+                continue
+            if sha != digest(path):
+                raise ValueError(f"public release bytes differ: {path.name}")
+            break
+
+
 def publish(bundle):
     source, assets = validate_bundle(bundle)
     env = publication_env(source)
@@ -295,16 +326,10 @@ def publish(bundle):
         run("gh", "release", "create", tag, "--repo", repo, "--draft", "--prerelease",
             "--latest=false", "--title", tag, "--notes-file", str(body), env=env)
     run("gh", "release", "upload", tag, "--repo", repo, *map(str, assets), env=env)
-    release = verify_remote_assets(repo, tag, assets, env)
+    verify_remote_assets(repo, tag, assets, env)
     run("gh", "release", "edit", tag, "--repo", repo, "--draft=false", "--latest=false", env=env)
     # Public URLs must work without an authentication token before reporting success.
-    for path in assets:
-        url = next(a["browser_download_url"] for a in release["assets"] if a["name"] == path.name)
-        request = urllib.request.Request(url, headers={"User-Agent": "DroidDeck-graphics-ci"})
-        with urllib.request.urlopen(request, timeout=120) as stream:
-            sha = hashlib.file_digest(stream, "sha256").hexdigest()
-        if sha != digest(path):
-            raise ValueError(f"public release bytes differ: {path.name}")
+    verify_public_assets(repo, tag, assets)
     print(f"Published and verified https://github.com/{repo}/releases/tag/{urllib.parse.quote(tag, safe='')}")
 
 
