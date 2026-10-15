@@ -267,12 +267,14 @@ class SteamPresentationTest(unittest.TestCase):
     def test_client_presentation_does_not_change_outer_gamescope_vulkan(self):
         source = SESSION.read_text()
         compositor = '  exec gamescope "${args[@]}" -- "$0" "$mode" "$@"'
-        # The first pass execs the compositor; client settings must remain below that boundary.
+        # Client settings must remain below the outer compositor launch boundary.
         before, _ = source.split(compositor, 1)
         self.assertNotIn("WSI_X11_FORCE_SHM", before)
         self.assertNotIn("VK_LAYER_window_system_integration", before)
+        helper_begin = source.index('run_gamescope() (')
+        helper_end = source.index('\n)\n', helper_begin) + 3
         begin = source.index('  width=${BL_WIDTH:-1280}')
-        script = 'mode=steam\n' + source[begin:source.index(compositor) + len(compositor)]
+        script = source[helper_begin:helper_end] + 'mode=steam\n' + source[begin:source.index(compositor) + len(compositor)]
         with tempfile.TemporaryDirectory(prefix="droiddeck-gamescope-env-") as tmp:
             gamescope = Path(tmp) / "gamescope"
             gamescope.write_text(f"#!{sys.executable}\nimport json, os, sys\n"
@@ -282,7 +284,8 @@ class SteamPresentationTest(unittest.TestCase):
             for gpu, presentation, software in (("mali", "x11-shm", "0"), ("powervr", "native", "1")):
                 with self.subTest(gpu=gpu):
                     env = {key: value for key, value in os.environ.items() if key not in GRAPHICS_KEYS}
-                    env.update(PATH=tmp + os.pathsep + env.get("PATH", ""), BL_MANGOAPP="0", BL_GAMESCOPE_BACKEND="sdl",
+                    env.update(PATH=tmp + os.pathsep + env.get("PATH", ""), XDG_RUNTIME_DIR=tmp,
+                               BL_MANGOAPP="0", BL_GAMESCOPE_BACKEND="sdl",
                                DROIDDECK_SYSTEM_VULKAN_GPU=gpu, DROIDDECK_SYSTEM_VULKAN_RUNTIME="/runtime",
                                DROIDDECK_SYSTEM_VULKAN_PRESENTATION=presentation, BL_STEAM_CEF_SOFTWARE=software,
                                VK_LAYER_PATH="/runtime/lib", VK_INSTANCE_LAYERS="VK_LAYER_HYBRIS_compat",
