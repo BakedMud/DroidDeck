@@ -161,9 +161,7 @@ Android compositor
 ## Runtime compatibility ownership
 
 The app selects the shared `VK_LAYER_HYBRIS_compat` layer for all three profiles;
-it no longer stages or enables a standalone Xclipse layer. The runtime uses
-[component release `4073873b`](https://github.com/wallentx/DroidDeck/releases/tag/hybris-4073873b9c8986740a17aa81d5952dad3a23a44c),
-built by [component CI](https://github.com/wallentx/DroidDeck/actions/runs/38685372864).
+it no longer stages or enables a standalone Xclipse layer.
 `tools/powervr/release.json` records the verified archive and tree checksums, recipe
 inputs, producer commit, and upstream source revision.
 
@@ -215,7 +213,7 @@ The component build is available through the existing APK workflow. Replace
 recipe and workflow:
 
 ```sh
-gh workflow run build.yml --repo wallentx/DroidDeck \
+gh workflow run build.yml --repo Droid-Deck/DroidDeck \
   --ref '<reviewed-branch-or-tag>' -f component=hybris
 ```
 
@@ -233,18 +231,15 @@ outer/session BC policy and the managed-game override when changing launch code.
 
 The paired Xclipse producer uses the same workflow with `-f component=dxvk-xclipse`.
 It emits `dxvk-2.6.2.tar.gz`, its checksum, and `dxvk-xclipse-component.json`.
-The pinned [component `202d551c`](https://github.com/wallentx/DroidDeck/releases/tag/dxvk-xclipse-202d551c6eef2158d6f448d98f495807e5a4db44)
-passed [component CI](https://github.com/wallentx/DroidDeck/actions/runs/38480706798)
-and archive, PE import/export, source and provenance verification.
+Component validation covers the archive, PE imports/exports, source and provenance.
 The candidate pin inventories all ten i386/x86-64 DLLs and records source, compiler,
 container, recipe and resolved build-tool provenance. Publish and verify that exact
 archive before replacing its entry in `release.json`; retain the other DXVK
 payload pins. A layer change that removes a previously advertised emulated feature
 must ship together with any consumer change needed to use its actual capabilities.
 
-The companion [Gamescope component](https://github.com/wallentx/DroidDeck/releases/tag/gamescope-review-20261014-e0d8edb3)
-passed [CI](https://github.com/wallentx/DroidDeck/actions/runs/38642690776) with the
-downstream GPU presentation patches, upstream's per-window limiter fix through
+The companion Gamescope component includes the downstream GPU presentation
+patches, upstream's per-window limiter fix through
 `4163b31b`, and nested cursor routing. The cursor, presentation, DMA-BUF, and SHM
 regressions passed in the combined source build. Failed fence duplication or waiter
 registration drops the affected commit while retaining frame-callback progress;
@@ -425,9 +420,8 @@ build; the PowerVR BC patch does not implement the other missing features.
 Consequently, Mali must not be locked to the PowerVR DXVK payload. Compatible
 DXVK builds/layers or game-specific choices still need separate validation.
 
-Historical installed-APK evidence goes beyond the Termux probe. The
-[full APK build at `b35888b`](https://github.com/wallentx/DroidDeck/actions/runs/38304474692)
-passed CI. On the Pixel 8 Pro, the installed 0.3.2 APK's native ARM64 Steam client
+Historical installed-APK evidence goes beyond the Termux probe. On the Pixel 8
+Pro, the installed 0.3.2 APK's native ARM64 Steam client
 reached `READY` using shared-memory presentation, and Old School Rally downloaded
 successfully.
 
@@ -437,9 +431,7 @@ gates above. The tested Old School Rally build produced white or black output
 with the WineD3D fallbacks and rejected `-force-vulkan` because Vulkan support was
 not built into the game. Managed DXVK and WineD3D choices remain user-controlled.
 
-The experimental Mali component at
-[`15dc6cbbc891e8633738ca1a822cf96403741b79`](https://github.com/wallentx/DroidDeck/commit/15dc6cbbc891e8633738ca1a822cf96403741b79)
-passed [component CI 38376448398](https://github.com/wallentx/DroidDeck/actions/runs/38376448398).
+The experimental Mali component used for this historical test passed component CI.
 Artifact checksums and provenance passed review, along with all 30 PE headers
 and the 10 ARM64X hybrids. All 15 baseline DLLs are byte-identical to the tested
 `b3e3322b` component. Wine truncates Mali ID `0xb8a20000` to `0`, so the guard
