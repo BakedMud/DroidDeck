@@ -14,6 +14,8 @@ object GameEnvironmentStore {
     /** The published file's extra DXVK options (droiddeck-game-env reads it; the app's own file has none). */
     const val DXVK_CONFIG = "dxvkConfig"
     const val GRAPHICS_PROFILE = "graphicsProfile"
+    /** Whether droiddeck-game-env adds its generated game diagnostics on the next launch. */
+    const val GAME_DEBUG_LOGS = "gameDebugLogs"
 
     @Synchronized
     fun read(context: Context): GameEnvironment.Config {
@@ -70,6 +72,11 @@ object GameEnvironmentStore {
         )
         if (dxvk.isNotEmpty()) json.put(DXVK_CONFIG, dxvk)
         PowerVrGraphicsProfile.publication(context)?.let { json.put(GRAPHICS_PROFILE, it) }
+        json.put(
+            GAME_DEBUG_LOGS,
+            SessionPrefs.logsEnabled(context) && SessionPrefs.gameDebugLogsEnabled(context) &&
+                SessionPaths.currentSessionLogsRetained(context),
+        )
         write(File(LinuxRuntime.rootDir(context), GUEST_FILE), json.toString())
     }
 

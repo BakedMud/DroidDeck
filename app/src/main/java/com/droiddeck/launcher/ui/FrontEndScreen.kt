@@ -91,6 +91,8 @@ class FrontEndState(
     val frameGenLabel: String,
     val romsDir: String?,
     val logsEnabled: Boolean,
+    val gameDebugLogsEnabled: Boolean,
+    val gameDebugLogsNeedsRestart: Boolean,
     /** Setup's Debugging tools toggle (AgentAccess): off unless the user turns it on. */
     val agentCommands: Boolean = false,
     val steamGames: List<Library.SteamGame>,
@@ -191,6 +193,7 @@ class FrontEndActions(
     val onFiles: () -> Unit,
     val onBrowseFiles: (File) -> Unit = {},
     val onLogs: () -> Unit,
+    val onGameDebugLogs: () -> Unit = {},
     val onAgentCommands: () -> Unit = {},
     val onShareLogs: () -> Unit = {},
     val onClearLogs: () -> Unit = {},
