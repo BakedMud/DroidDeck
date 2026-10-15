@@ -1,51 +1,275 @@
 name: Build game graphics components
+
 on:
   push:
+    branches: [dev]
     paths:
       - 'tools/dxvk/**'
       - 'tools/vulkan-wsi/**'
       - '.github/workflows/build-game-graphics.yml'
   workflow_dispatch:
+    inputs:
+      source_repository:
+        description: 'Source repository (blank uses this repository)'
+        required: false
+        type: string
+        default: ''
+      source_ref:
+        description: 'Source branch, tag, SHA, PR number, or PR URL'
+        required: false
+        type: string
+        default: dev
+      components:
+        description: 'Components to build'
+        required: false
+        type: choice
+        options: [all, hybris, dxvk, wsi, dxvk-xclipse, dxvk-mali, gamescope]
+        default: all
+      publish:
+        description: 'Publish the aggregated component bundle'
+        required: false
+        type: boolean
+        default: false
+      release_tag:
+        description: 'Release tag for publication'
+        required: false
+        type: string
+        default: ''
+
 permissions:
   contents: read
+
 jobs:
-  dxvk:
+  resolve:
+    name: Resolve requested source
+    if: ${{ github.event_name != 'workflow_dispatch' || github.ref == 'refs/heads/dev' }}
     runs-on: ubuntu-24.04
-    timeout-minutes: 45
+    timeout-minutes: 10
+    permissions:
+      contents: read
+      pull-requests: read
+    outputs:
+      repository: ${{ steps.resolve.outputs.repository }}
+      commit: ${{ steps.resolve.outputs.commit }}
+      matrix: ${{ steps.resolve.outputs.matrix }}
+      release_tag: ${{ steps.resolve.outputs.release_tag }}
+      publish_repository: ${{ steps.resolve.outputs.publish_repository }}
     steps:
       - uses: actions/checkout@v7
-      - name: Install build tools
-        run: |
-          sudo apt-get update
-          sudo apt-get install -y meson ninja-build glslang-tools zstd g++-mingw-w64-x86-64-posix g++-mingw-w64-i686-posix
-      - name: Build pinned DXVK with format-based BC checks
-        run: bash tools/dxvk/build.sh out/dxvk
+        with:
+          ref: ${{ github.sha }}
+          path: controller
+          persist-credentials: false
+      - name: Resolve the requested source
+        id: resolve
+        env:
+          GH_TOKEN: ${{ github.token }}
+          SOURCE_REPOSITORY: ${{ inputs.source_repository || github.repository }}
+          SOURCE_REF: ${{ inputs.source_ref || github.sha }}
+          COMPONENTS: ${{ github.event_name == 'workflow_dispatch' && inputs.components || 'dxvk,wsi' }}
+          RELEASE_TAG: ${{ inputs.release_tag }}
+        run: python3 controller/tools/graphics-ci/control.py resolve --output source.json
       - uses: actions/upload-artifact@v7
         with:
-          name: graphics-dxvk
-          path: out/dxvk
-  wsi:
-    runs-on: ubuntu-24.04-arm
-    timeout-minutes: 30
+          name: graphics-source
+          path: source.json
+          if-no-files-found: error
+
+  build:
+    name: Build ${{ matrix.component }}
+    needs: resolve
+    runs-on: ${{ matrix.runner }}
+    timeout-minutes: 120
+    permissions:
+      contents: read
+    strategy:
+      fail-fast: false
+      matrix: ${{ fromJSON(needs.resolve.outputs.matrix) }}
     steps:
       - uses: actions/checkout@v7
-      - name: Install build tools
+        with:
+          ref: ${{ github.sha }}
+          path: controller
+          persist-credentials: false
+      - uses: actions/checkout@v7
+        with:
+          repository: ${{ needs.resolve.outputs.repository }}
+          ref: ${{ needs.resolve.outputs.commit }}
+          path: source
+          persist-credentials: false
+      - uses: actions/download-artifact@v7
+        with:
+          name: graphics-source
+          path: .
+      - name: Install component prerequisites
+        env:
+          COMPONENT: ${{ matrix.component }}
         run: |
+          set -euo pipefail
+          case "$COMPONENT" in
+            hybris)
+              packages=(podman patchelf zstd libvulkan-dev spirv-tools)
+              ;;
+            dxvk)
+              packages=(meson ninja-build glslang-tools zstd g++-mingw-w64-x86-64-posix g++-mingw-w64-i686-posix)
+              ;;
+            wsi)
+              packages=(cmake ninja-build g++ pkg-config zstd libvulkan-dev libdrm-dev libxcb1-dev libxcb-shm0-dev libxcb-sync-dev libxcb-dri3-dev libxcb-present-dev libxcb-randr0-dev libx11-dev libx11-xcb-dev libxrandr-dev vulkan-validationlayers)
+              ;;
+            dxvk-xclipse)
+              packages=(podman)
+              ;;
+            dxvk-mali)
+              packages=(podman zstd)
+              ;;
+            gamescope)
+              packages=(zstd)
+              ;;
+            *)
+              echo "::error::unknown component $COMPONENT"
+              exit 2
+              ;;
+          esac
           sudo apt-get update
-          sudo apt-get install -y cmake ninja-build g++ pkg-config zstd libvulkan-dev libdrm-dev libxcb1-dev libxcb-shm0-dev libxcb-sync-dev libxcb-dri3-dev libxcb-present-dev libxcb-randr0-dev libx11-dev libx11-xcb-dev libxrandr-dev vulkan-validationlayers
-      - name: Build pinned X11 WSI layer
-        run: bash tools/vulkan-wsi/build.sh out/wsi
-      - name: Collect validation layer for device diagnostics
+          sudo apt-get install -y "${packages[@]}"
+          if [[ "$COMPONENT" == gamescope ]]; then
+            command -v docker
+          fi
+      - name: Build and record
+        env:
+          COMPONENT: ${{ matrix.component }}
+          SOURCE_COMMIT: ${{ needs.resolve.outputs.commit }}
         run: |
+          set -euo pipefail
+          test "$(jq -r .commit source.json)" = "$SOURCE_COMMIT"
+          test "$(git -C source rev-parse HEAD)" = "$SOURCE_COMMIT"
+          test "$(git -C controller rev-parse HEAD)" = "$(jq -r .controller_commit source.json)"
+          bash controller/tools/graphics-ci/build.sh "$COMPONENT" "$PWD/source" "$PWD/out/build"
+          python3 controller/tools/graphics-ci/record.py \
+            --component "$COMPONENT" \
+            --source "$PWD/source" \
+            --build-dir "$PWD/out/build" \
+            --output "$PWD/out/component" \
+            --source-record "$PWD/source.json"
+      - name: Collect WSI validation layer
+        if: matrix.component == 'wsi'
+        run: |
+          set -euo pipefail
           mkdir -p out/validation
           cp /usr/lib/aarch64-linux-gnu/libVkLayer_khronos_validation.so out/validation/
           cp /usr/share/vulkan/explicit_layer.d/VkLayer_khronos_validation.json out/validation/
           cp /usr/share/doc/vulkan-validationlayers/copyright out/validation/LICENSE
       - uses: actions/upload-artifact@v7
+        if: matrix.component == 'wsi'
         with:
           name: graphics-validation
           path: out/validation
+          if-no-files-found: error
       - uses: actions/upload-artifact@v7
         with:
+          name: graphics-${{ matrix.component }}
+          path: out/component
+          if-no-files-found: error
+
+  aggregate:
+    name: Assemble graphics release bundle
+    needs: [resolve, build]
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          ref: ${{ github.sha }}
+          path: controller
+          persist-credentials: false
+      - uses: actions/download-artifact@v7
+        with:
+          name: graphics-source
+          path: .
+      - uses: actions/checkout@v7
+        with:
+          repository: ${{ needs.resolve.outputs.repository }}
+          ref: ${{ needs.resolve.outputs.commit }}
+          path: verification-source
+          persist-credentials: false
+      - name: Verify source identity
+        env:
+          SOURCE_COMMIT: ${{ needs.resolve.outputs.commit }}
+        run: test "$(git -C verification-source rev-parse HEAD)" = "$SOURCE_COMMIT"
+      - name: Install bundle verifier
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y zstd
+      - uses: actions/download-artifact@v7
+        if: contains(fromJSON(needs.resolve.outputs.matrix).include.*.component, 'hybris')
+        with:
+          name: graphics-hybris
+          path: incoming
+          merge-multiple: true
+      - uses: actions/download-artifact@v7
+        if: contains(fromJSON(needs.resolve.outputs.matrix).include.*.component, 'dxvk')
+        with:
+          name: graphics-dxvk
+          path: incoming
+          merge-multiple: true
+      - uses: actions/download-artifact@v7
+        if: contains(fromJSON(needs.resolve.outputs.matrix).include.*.component, 'wsi')
+        with:
           name: graphics-wsi
-          path: out/wsi
+          path: incoming
+          merge-multiple: true
+      - uses: actions/download-artifact@v7
+        if: contains(fromJSON(needs.resolve.outputs.matrix).include.*.component, 'dxvk-xclipse')
+        with:
+          name: graphics-dxvk-xclipse
+          path: incoming
+          merge-multiple: true
+      - uses: actions/download-artifact@v7
+        if: contains(fromJSON(needs.resolve.outputs.matrix).include.*.component, 'dxvk-mali')
+        with:
+          name: graphics-dxvk-mali
+          path: incoming
+          merge-multiple: true
+      - uses: actions/download-artifact@v7
+        if: contains(fromJSON(needs.resolve.outputs.matrix).include.*.component, 'gamescope')
+        with:
+          name: graphics-gamescope
+          path: incoming
+          merge-multiple: true
+      - name: Assemble verified bundle
+        run: python3 controller/tools/graphics-ci/control.py aggregate --source-record source.json --source "$PWD/verification-source" --input incoming --output bundle
+      - uses: actions/upload-artifact@v7
+        with:
+          name: graphics-release-bundle
+          path: bundle
+          if-no-files-found: error
+
+  publish:
+    name: Publish graphics release bundle
+    needs: [resolve, aggregate]
+    if: ${{ github.event_name == 'workflow_dispatch' && github.ref == 'refs/heads/dev' && inputs.publish }}
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          ref: ${{ github.sha }}
+          path: controller
+          persist-credentials: false
+      - uses: actions/download-artifact@v7
+        with:
+          name: graphics-release-bundle
+          path: bundle
+      - name: Install bundle verifier
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y zstd
+      - name: Publish verified bundle
+        env:
+          GH_TOKEN: ${{ github.token }}
+          CURRENT_REPOSITORY_TOKEN: ${{ github.token }}
+        run: python3 controller/tools/graphics-ci/control.py publish --bundle bundle
