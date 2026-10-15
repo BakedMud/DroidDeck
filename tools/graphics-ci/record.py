@@ -42,6 +42,10 @@ REQUIRED_HYBRIS_LIBRARIES = (
     "lib/libVkLayer_DROIDDECK_placed_memory.so",
 )
 DLL_NAMES = ("d3d8.dll", "d3d9.dll", "d3d10core.dll", "d3d11.dll", "dxgi.dll")
+WSI_PROVENANCE_LICENSES = {
+    "licenses/Vulkan-Headers/LICENSE.md": "tools/vulkan-wsi/licenses/Vulkan-Headers/LICENSE.md",
+    "licenses/Vulkan-Headers/MIT.txt": "tools/vulkan-wsi/licenses/Vulkan-Headers/MIT.txt",
+}
 
 
 def sha256(data: bytes) -> str:
@@ -577,6 +581,31 @@ def _validate_wsi(source: Path, entries) -> None:
     _object(json.loads(_read_entry(entries, "VkLayer_window_system_integration.json")), "WSI layer manifest")
 
 
+def _wsi_template(source: Path, template: dict, entries) -> dict:
+    result = dict(template)
+    result["files"] = [dict(item) for item in template["files"]]
+    result["ignored"] = list(template["ignored"])
+    mapped = {item.get("name") for item in result["files"]}
+    for archive_name, source_name in WSI_PROVENANCE_LICENSES.items():
+        if archive_name in mapped:
+            raise ValueError(
+                f"WSI provenance license must remain ignored to avoid a duplicate assembly destination: {archive_name}"
+            )
+        tracked = source / source_name
+        if not tracked.is_file():
+            if archive_name in entries:
+                raise ValueError(
+                    f"WSI archive contains a provenance license with no tracked selected-source copy: {archive_name}"
+                )
+            continue
+        if archive_name in entries and _read_entry(entries, archive_name) != tracked.read_bytes():
+            raise ValueError(f"WSI archive license differs from the selected source: {archive_name}")
+        if archive_name not in result["ignored"]:
+            result["ignored"].append(archive_name)
+    result["ignored"].sort()
+    return result
+
+
 def _validate_mali(source: Path, entries) -> None:
     values = _env(source / "tools/dxvk/source.env")
     if _read_entry(entries, "source-commit").decode().strip() != values.get("DXVK_REVISION"):
@@ -609,10 +638,10 @@ def _pin_from_template(component: str, template: dict, entries, recipe: dict) ->
         raise ValueError(f"selected source has overlapping {component} file mappings")
     archive_names = set(entries)
     allowed = set(expected) | set(ignored)
-    if archive_names != allowed:
+    if not set(expected).issubset(archive_names) or not archive_names.issubset(allowed):
         raise ValueError(
             f"{component} archive member set differs from its source mapping: "
-            f"missing={sorted(allowed - archive_names)}, extra={sorted(archive_names - allowed)}"
+            f"missing={sorted(set(expected) - archive_names)}, extra={sorted(archive_names - allowed)}"
         )
     destinations = set()
     for name, target in expected.items():
@@ -779,6 +808,7 @@ def create_record(component: str, source: Path, build_dir: Path, output: Path, s
             _validate_dxvk(source, entries, component, recipe)
         elif component == "wsi":
             _validate_wsi(source, entries)
+            template = _wsi_template(source, template, entries)
         else:
             _validate_mali(source, entries)
         pin = _pin_from_template(component, template, entries, recipe)
@@ -911,7 +941,10 @@ def verify_record(directory: Path | str, record, expected_source=None) -> None:
                 or len(content) != item["size"] or sha256(content) != item["sha256"]):
             raise ValueError(f"component member differs from its pin: {name}")
     ignored_names = {_safe_name(name) for name in ignored}
-    if len(ignored_names) != len(ignored) or ignored_names & expected_names or set(entries) != expected_names | ignored_names:
+    archive_names = set(entries)
+    if (len(ignored_names) != len(ignored) or ignored_names & expected_names
+            or not expected_names.issubset(archive_names)
+            or not archive_names.issubset(expected_names | ignored_names)):
         raise ValueError("component archive member set differs from its pin")
     if component in ("dxvk", "dxvk-xclipse", "dxvk-mali"):
         _validate_pe(component, entries, files)
@@ -981,6 +1014,7 @@ def verify_source(directory: Path | str, record, source: Path | str) -> None:
                 _validate_dxvk(source, entries, component, recipe)
             elif component == "wsi":
                 _validate_wsi(source, entries)
+                template = _wsi_template(source, template, entries)
             else:
                 _validate_mali(source, entries)
             expected_pin = _pin_from_template(component, template, entries, recipe)

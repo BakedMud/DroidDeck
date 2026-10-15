@@ -6,6 +6,8 @@ on:
     paths:
       - 'tools/dxvk/**'
       - 'tools/vulkan-wsi/**'
+      - 'tools/graphics-ci/**'
+      - 'tools/tests/test_graphics*.py'
       - '.github/workflows/build-game-graphics.yml'
   workflow_dispatch:
     inputs:

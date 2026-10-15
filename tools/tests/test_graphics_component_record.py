@@ -94,6 +94,43 @@ class GraphicsComponentRecordTest(unittest.TestCase):
             "dxvk", self.source, self.build, self.output, self.source_record,
         )
 
+    def populate_wsi(self, build, include_licenses, tracked_licenses=True):
+        wsi = self.source / "tools/vulkan-wsi"
+        (wsi / "patches").mkdir(parents=True, exist_ok=True)
+        (wsi / "build.sh").write_text("WSI build recipe\n")
+        (wsi / "source.env").write_text(
+            "WSI_REVISION=" + "d" * 40 + "\n"
+            "VULKAN_HEADERS_REVISION=" + "e" * 40 + "\n"
+        )
+        (wsi / "patches/0001-test.patch").write_text("WSI patch\n")
+        if tracked_licenses:
+            licenses = wsi / "licenses/Vulkan-Headers"
+            licenses.mkdir(parents=True, exist_ok=True)
+            (licenses / "LICENSE.md").write_text("Vulkan-Headers license\n")
+            (licenses / "MIT.txt").write_text("MIT license\n")
+        build.mkdir(parents=True)
+        elf = bytearray(64)
+        elf[:6], elf[18:20] = b"\x7fELF\x02\x01", struct.pack("<H", 183)
+        library = bytes(elf)
+        files = {
+            "libVkLayer_window_system_integration.so": library,
+            "VkLayer_window_system_integration.json": b"{}\n",
+            "LICENSE": b"WSI license\n",
+            "source-commit": ("d" * 40 + "\n").encode(),
+            "SHA256SUMS": (record.sha256(library) + "  libVkLayer_window_system_integration.so\n").encode(),
+            "downstream.patch": b"WSI patch\n",
+            "source.tar.zst": b"source archive",
+            "vulkan-headers-commit": ("e" * 40 + "\n").encode(),
+        }
+        if include_licenses:
+            for name, source_name in record.WSI_PROVENANCE_LICENSES.items():
+                tracked = self.source / source_name
+                files[name] = tracked.read_bytes() if tracked.is_file() else b"untracked license\n"
+        for name, content in files.items():
+            path = build / name
+            path.parent.mkdir(parents=True, exist_ok=True)
+            path.write_bytes(content)
+
     def test_records_dev_dxvk_without_release_template_and_recomputes_pin(self):
         result = self.create_dxvk()
         self.assertEqual(result["artifact"]["name"], "dxvk.zip")
@@ -118,6 +155,63 @@ class GraphicsComponentRecordTest(unittest.TestCase):
             record.verify_record(self.output, result, {
                 "repository": "other/source", "commit": "b" * 40,
             })
+
+    def test_wsi_accepts_old_and_new_license_layouts_without_destinations(self):
+        records = {}
+        for include_licenses in (False, True):
+            build = self.root / f"wsi-build-{include_licenses}"
+            output = self.root / f"wsi-output-{include_licenses}"
+            self.populate_wsi(build, include_licenses)
+            result = record.create_record(
+                "wsi", self.source, build, output, self.source_record,
+            )
+            record.verify_record(output, result)
+            self.assertEqual(
+                result["pin"]["ignored"], sorted(record.WSI_PROVENANCE_LICENSES),
+            )
+            self.assertFalse(
+                set(record.WSI_PROVENANCE_LICENSES)
+                & {item["name"] for item in result["pin"]["files"]}
+            )
+            entries = record._read_zip((output / "wsi.zip").read_bytes())
+            self.assertEqual(
+                set(entries) & set(record.WSI_PROVENANCE_LICENSES),
+                set(record.WSI_PROVENANCE_LICENSES) if include_licenses else set(),
+            )
+            records[include_licenses] = (output, result)
+
+        subprocess.run(["git", "init", "-q", str(self.source)], check=True)
+        subprocess.run(["git", "-C", str(self.source), "add", "."], check=True)
+        subprocess.run([
+            "git", "-C", str(self.source), "-c", "user.name=Graphics Test",
+            "-c", "user.email=graphics-test@example.invalid", "commit", "-qm", "fixture",
+        ], check=True)
+        head = subprocess.check_output(
+            ["git", "-C", str(self.source), "rev-parse", "HEAD"], text=True,
+        ).strip()
+        output, result = records[True]
+        result["source"]["commit"] = head
+        record.verify_source(output, result, self.source)
+
+    def test_rejects_wsi_license_that_differs_from_selected_source(self):
+        build = self.root / "wsi-build"
+        self.populate_wsi(build, True)
+        (build / "licenses/Vulkan-Headers/MIT.txt").write_text("substituted license\n")
+        with self.assertRaisesRegex(ValueError, "license differs"):
+            record.create_record("wsi", self.source, build, self.output, self.source_record)
+
+    def test_legacy_wsi_source_without_tracked_licenses_remains_supported(self):
+        build = self.root / "legacy-wsi-build"
+        self.populate_wsi(build, False, tracked_licenses=False)
+        result = record.create_record("wsi", self.source, build, self.output, self.source_record)
+        self.assertEqual(result["pin"]["ignored"], [])
+        record.verify_record(self.output, result)
+
+        extra_build = self.root / "legacy-wsi-extra-build"
+        self.populate_wsi(extra_build, True, tracked_licenses=False)
+        extra_output = self.root / "legacy-wsi-extra-output"
+        with self.assertRaisesRegex(ValueError, "no tracked selected-source copy"):
+            record.create_record("wsi", self.source, extra_build, extra_output, self.source_record)
 
     def test_rejects_source_mapping_that_omits_a_built_member(self):
         self.populate_dxvk()
