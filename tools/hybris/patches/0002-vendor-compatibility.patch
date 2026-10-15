@@ -595,8 +595,8 @@ index 0000000..5cb672c
 +    VkDescriptorSetLayoutBinding *bindings = array_alloc(allocator,
 +        info->bindingCount, sizeof(*bindings));
 +    VkSampler **arrays = array_alloc(allocator, info->bindingCount, sizeof(*arrays));
++    if (arrays) memset(arrays, 0, info->bindingCount * sizeof(*arrays));
 +    if (!bindings || !arrays) goto done;
-+    memset(arrays, 0, info->bindingCount * sizeof(*arrays));
 +    for (uint32_t b = 0; b < info->bindingCount; ++b) {
 +        bindings[b] = info->pBindings[b];
 +        if (bindings[b].descriptorType != VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER ||

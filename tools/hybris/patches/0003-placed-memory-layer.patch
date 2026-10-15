@@ -669,7 +669,7 @@ new file mode 100644
 index 0000000..00a6b95
 --- /dev/null
 +++ b/hybris/vulkan/placed/placed_layer.c
-@@ -0,0 +1,1768 @@
+@@ -0,0 +1,1787 @@
 +/* SPDX-License-Identifier: MIT
 + * Copyright (c) 2026 DroidDeck contributors.
 + * Experimental OPAQUE_FD placed mappings. Explicit opt-in required.
@@ -848,6 +848,7 @@ index 0000000..00a6b95
 +    struct instance *instance;
 +    PFN_vkGetDeviceProcAddr gdpa;
 +    int active;
++    int emulate_map2;
 +    enum backend backend;
 +    int placed;
 +    int reserve;
@@ -1193,11 +1194,18 @@ index 0000000..00a6b95
 +    d->gdpa = link->u.pLayerInfo->pfnNextGetDeviceProcAddr;
 +    PFN_vkCreateDevice create =
 +        (void *)link->u.pLayerInfo->pfnNextGetInstanceProcAddr(i->h, "vkCreateDevice");
-+    int requested = 0;
-+    for (uint32_t n = 0; n < ci->enabledExtensionCount; n++)
++    int requested = 0, requested_map2 = 0;
++    for (uint32_t n = 0; n < ci->enabledExtensionCount; n++) {
 +        if (!strcmp(ci->ppEnabledExtensionNames[n], PLACED))
 +            requested = 1;
-+    d->active = requested && emulate(i, p);
++        if (!strcmp(ci->ppEnabledExtensionNames[n], MAP2))
++            requested_map2 = 1;
++    }
++    int can_emulate = (requested || requested_map2) && emulate(i, p);
++    d->active = requested && can_emulate;
++    /* map_memory2 is independently enableable; only consume the extension
++     * when the layer implements it instead of the native driver. */
++    d->emulate_map2 = requested_map2 && can_emulate && !native_ext(i, p, MAP2);
 +    d->backend = select_backend(i, p);
 +    VkDeviceCreateInfo copy = *ci;
 +    struct chain_copy chain = {0};
@@ -1212,6 +1220,8 @@ index 0000000..00a6b95
 +        }
 +        d->placed = feat && feat->memoryMapPlaced;
 +        d->reserve = feat && feat->memoryUnmapReserve;
++    }
++    if (d->active || d->emulate_map2) {
 +        exts = zalloc(a, ((size_t)ci->enabledExtensionCount + 1) * sizeof(*exts),
 +                      VK_SYSTEM_ALLOCATION_SCOPE_COMMAND);
 +        if (!exts) {
@@ -1222,13 +1232,13 @@ index 0000000..00a6b95
 +        int have_fd = 0;
 +        for (uint32_t n = 0; n < ci->enabledExtensionCount; n++) {
 +            const char *s = ci->ppEnabledExtensionNames[n];
-+            if (!strcmp(s, PLACED) || !strcmp(s, MAP2))
++            if ((d->active && !strcmp(s, PLACED)) || (d->emulate_map2 && !strcmp(s, MAP2)))
 +                continue;
 +            exts[copy.enabledExtensionCount++] = s;
 +            if (!strcmp(s, FD_EXT))
 +                have_fd = 1;
 +        }
-+        if (!have_fd)
++        if (d->active && !have_fd)
 +            exts[copy.enabledExtensionCount++] = FD_EXT;
 +        copy.ppEnabledExtensionNames = exts;
 +    }
@@ -2196,7 +2206,11 @@ index 0000000..00a6b95
 +    if (!d->active) {
 +        if (d->MapMemory2KHR)
 +            return d->MapMemory2KHR(h, ci, out);
-+        return VK_ERROR_EXTENSION_NOT_PRESENT;
++        if (!d->emulate_map2)
++            return VK_ERROR_EXTENSION_NOT_PRESENT;
++        if (ci->pNext || ci->flags)
++            return VK_ERROR_MEMORY_MAP_FAILED;
++        return d->MapMemory(h, ci->memory, ci->offset, ci->size, 0, out);
 +    }
 +    if (!(ci->flags & VK_MEMORY_MAP_PLACED_BIT_EXT)) {
 +        if (ci->pNext || ci->flags) {
@@ -2297,7 +2311,12 @@ index 0000000..00a6b95
 +    if (!d->active) {
 +        if (d->UnmapMemory2KHR)
 +            return d->UnmapMemory2KHR(h, ci);
-+        return VK_ERROR_EXTENSION_NOT_PRESENT;
++        if (!d->emulate_map2)
++            return VK_ERROR_EXTENSION_NOT_PRESENT;
++        if (ci->pNext || ci->flags)
++            return VK_ERROR_MEMORY_MAP_FAILED;
++        d->UnmapMemory(h, ci->memory);
++        return VK_SUCCESS;
 +    }
 +    if (ci->pNext || (ci->flags & ~VK_MEMORY_UNMAP_RESERVE_BIT_EXT) || (ci->flags && !d->reserve))
 +        return VK_ERROR_MEMORY_MAP_FAILED;
@@ -2392,10 +2411,10 @@ index 0000000..00a6b95
 +    PFN_vkVoidFunction hook = device_hook(n);
 +    if (!strcmp(n, "vkDestroyDevice"))
 +        return hook;
++    if (map2_name(n) && (d->active || d->emulate_map2))
++        return hook;
 +    if (!d->active)
 +        return next;
-+    if (map2_name(n))
-+        return hook;
 +    return next && hook ? hook : next;
 +}
 +static PFN_vkVoidFunction VKAPI_CALL l_GetInstanceProcAddr(VkInstance h, const char *n) {

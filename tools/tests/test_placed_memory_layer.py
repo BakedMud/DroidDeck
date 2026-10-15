@@ -73,7 +73,8 @@ class PlacedMemoryLayerTest(unittest.TestCase):
             program = directory / "placed-memory-test"
             self.checked([*common, str(HELPER), "-o", str(program), "-ldl"])
             ran = self.checked([str(program)])
-            for contract in ("PASS dispatch:", "PASS resources:", "PASS mapping:",
+            for contract in ("PASS dispatch:", "PASS map2 only:", "PASS placed features disabled:",
+                             "PASS resources:", "PASS mapping:",
                              "PASS concurrency:", "PASS mali resources:",
                              "PASS mali placement:", "PASS total:"):
                 self.assertIn(contract, ran.stdout)

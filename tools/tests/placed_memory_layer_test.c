@@ -275,7 +275,11 @@ static VkPhysicalDevice P = (VkPhysicalDevice)&ph;
 static VkDevice D = (VkDevice)&dh;
 static _Atomic unsigned allocs, frees, native_maps, native_unmaps, driver_frees;
 static int fail_native_map, short_fd, expect_filtered, explicit_failures, have_native_placed;
-static int mali_mode;
+static int mali_mode, have_native_map2, core_map2_only, device_map2_enabled;
+static unsigned forwarded_extension_count, native_map2_calls, native_unmap2_calls;
+static int forwarded_fd, forwarded_placed;
+static const VkMemoryMapInfoKHR *native_map2_info;
+static const VkMemoryUnmapInfoKHR *native_unmap2_info;
 static _Atomic VkExternalMemoryHandleTypeFlags last_export;
 struct native_memory {
     int fd;
@@ -310,7 +314,7 @@ static VkResult VKAPI_CALL ne(VkPhysicalDevice p, const char *layer, uint32_t *n
     assert(p == P);
     if (layer)
         return VK_ERROR_LAYER_NOT_PRESENT;
-    uint32_t count = have_native_placed ? 2 : 1;
+    uint32_t count = 1 + !!have_native_placed + !!have_native_map2;
     if (!out) {
         *n = count;
         return VK_SUCCESS;
@@ -320,9 +324,13 @@ static VkResult VKAPI_CALL ne(VkPhysicalDevice p, const char *layer, uint32_t *n
         strcpy(out[0].extensionName, FD_EXT);
         out[0].specVersion = 1;
     }
-    if (written > 1) {
+    if (have_native_placed && written > 1) {
         strcpy(out[1].extensionName, PLACED);
         out[1].specVersion = 1;
+    }
+    if (have_native_map2 && written > 1u + !!have_native_placed) {
+        strcpy(out[1 + !!have_native_placed].extensionName, MAP2);
+        out[1 + !!have_native_placed].specVersion = 1;
     }
     *n = written;
     return written < count ? VK_INCOMPLETE : VK_SUCCESS;
@@ -347,7 +355,7 @@ static void VKAPI_CALL nf(VkPhysicalDevice p, VkPhysicalDeviceFeatures2 *out) {
 }
 static void VKAPI_CALL nprop(VkPhysicalDevice p, VkPhysicalDeviceProperties2 *out) {
     assert(p == P);
-    out->properties.apiVersion = VK_API_VERSION_1_3;
+    out->properties.apiVersion = core_map2_only ? VK_MAKE_API_VERSION(0, 1, 4, 0) : VK_API_VERSION_1_3;
     out->properties.vendorID = mali_mode == 1 ? 0x13b5 : 0;
 }
 static void VKAPI_CALL nprop1(VkPhysicalDevice p, VkPhysicalDeviceProperties *out) {
@@ -404,13 +412,20 @@ static VkResult VKAPI_CALL ncd(VkPhysicalDevice p, const VkDeviceCreateInfo *ci,
                                const VkAllocationCallbacks *a, VkDevice *out) {
     assert(p == P);
     (void)a;
+    forwarded_extension_count = ci->enabledExtensionCount;
+    device_map2_enabled = forwarded_fd = forwarded_placed = 0;
+    for (uint32_t j = 0; j < ci->enabledExtensionCount; j++) {
+        device_map2_enabled |= !strcmp(ci->ppEnabledExtensionNames[j], MAP2);
+        forwarded_fd |= !strcmp(ci->ppEnabledExtensionNames[j], FD_EXT);
+        forwarded_placed |= !strcmp(ci->ppEnabledExtensionNames[j], PLACED);
+    }
     if (expect_filtered) {
         assert(!find_chain(ci->pNext,
                            VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_MAP_MEMORY_PLACED_FEATURES_EXT));
         int fd = 0;
         for (uint32_t j = 0; j < ci->enabledExtensionCount; j++) {
             assert(strcmp(ci->ppEnabledExtensionNames[j], PLACED));
-            assert(strcmp(ci->ppEnabledExtensionNames[j], MAP2));
+            assert(have_native_map2 || strcmp(ci->ppEnabledExtensionNames[j], MAP2));
             if (!strcmp(ci->ppEnabledExtensionNames[j], FD_EXT))
                 fd = 1;
         }
@@ -518,16 +533,17 @@ static void VKAPI_CALL nfree(VkDevice h, VkDeviceMemory handle, const VkAllocati
 }
 static VkResult VKAPI_CALL nm(VkDevice h, VkDeviceMemory handle, VkDeviceSize offset,
                               VkDeviceSize size, VkMemoryMapFlags flags, void **out) {
-    assert(h == D && !flags && !offset);
+    assert(h == D && !flags);
     assert(!mapping_lock_depth);
     struct native_memory *m = (void *)handle;
-    assert(size == VK_WHOLE_SIZE || size == m->size);
+    assert(offset < m->size);
+    assert(size == VK_WHOLE_SIZE || (size && size <= m->size - offset));
     assert(!m->map);
     if (fail_native_map)
         return VK_ERROR_MEMORY_MAP_FAILED;
     m->map = mmap(NULL, m->size, PROT_READ | PROT_WRITE, MAP_SHARED, m->fd, 0);
     assert(m->map != MAP_FAILED);
-    *out = m->map;
+    *out = (char *)m->map + offset;
     if (model_enabled) model_native = m->map;
     native_maps++;
     return VK_SUCCESS;
@@ -541,6 +557,18 @@ static void VKAPI_CALL nu(VkDevice h, VkDeviceMemory handle) {
     m->map = NULL;
     if (model_enabled) model_native = NULL;
     native_unmaps++;
+}
+static VkResult VKAPI_CALL nm2(VkDevice h, const VkMemoryMapInfoKHR *ci, void **out) {
+    native_map2_calls++;
+    native_map2_info = ci;
+    return nm(h, ci->memory, ci->offset, ci->size, ci->flags, out);
+}
+static VkResult VKAPI_CALL nu2(VkDevice h, const VkMemoryUnmapInfoKHR *ci) {
+    assert(!ci->flags);
+    native_unmap2_calls++;
+    native_unmap2_info = ci;
+    nu(h, ci->memory);
+    return VK_SUCCESS;
 }
 static VkResult VKAPI_CALL nfd(VkDevice h, const VkMemoryGetFdInfoKHR *in, int *out) {
     assert(h == D && in->handleType == OPAQUE);
@@ -569,7 +597,13 @@ static PFN_vkVoidFunction VKAPI_CALL ngdpa(VkDevice h, const char *n) {
                             N("FreeMemory", nfree) N("MapMemory", nm) N("UnmapMemory", nu)
                                 N("GetMemoryFdKHR", nfd)
 #undef N
-                                    if (map2_name(n)) return NULL;
+    if (map2_name(n)) {
+        if (core_map2_only) {
+            if (strstr(n, "KHR")) return NULL;
+        } else if (!have_native_map2 || !device_map2_enabled) return NULL;
+        return !strcmp(n, "vkMapMemory2KHR") || !strcmp(n, "vkMapMemory2")
+                   ? (PFN_vkVoidFunction)nm2 : (PFN_vkVoidFunction)nu2;
+    }
     return (PFN_vkVoidFunction)dummy;
 }
 static PFN_vkVoidFunction VKAPI_CALL ngipa(VkInstance h, const char *n) {
@@ -601,7 +635,7 @@ static void setup(int enabled) {
     VkInstance out;
     assert(l_CreateInstance(&ci, &callbacks, &out) == VK_SUCCESS && out == I);
 }
-static void create_device(int enabled) {
+static void create_device_features(int enabled, int placed_features) {
     VkLayerDeviceLink link = {.pfnNextGetInstanceProcAddr = ngipa,
                               .pfnNextGetDeviceProcAddr = ngdpa};
     VkLayerDeviceCreateInfo lc = {.sType = VK_STRUCTURE_TYPE_LOADER_DEVICE_CREATE_INFO,
@@ -610,8 +644,8 @@ static void create_device(int enabled) {
     VkPhysicalDeviceMapMemoryPlacedFeaturesEXT pf = {
         .sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_MAP_MEMORY_PLACED_FEATURES_EXT,
         .pNext = &lc,
-        .memoryMapPlaced = VK_TRUE,
-        .memoryUnmapReserve = VK_TRUE};
+        .memoryMapPlaced = placed_features,
+        .memoryUnmapReserve = placed_features};
     VkPhysicalDeviceVulkan12Features prefix = {
         .sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_VULKAN_1_2_FEATURES,
         .pNext = &pf,
@@ -627,6 +661,9 @@ static void create_device(int enabled) {
     assert(l_CreateDevice(P, &ci, &callbacks, &out) == VK_SUCCESS && out == D);
     assert(!memcmp(&saved, &prefix, sizeof(prefix)));
     assert(pf.pNext == &lc);
+}
+static void create_device(int enabled) {
+    create_device_features(enabled, 1);
 }
 static void teardown(void) {
     l_DestroyDevice(D, &callbacks);
@@ -674,6 +711,133 @@ static void test_dispatch(void) {
     teardown();
     puts("PASS dispatch: disabled pass-through, core/KHR aliases, feature/property exposure, "
          "extension enumeration, immutable chains");
+}
+static void create_map2_device(int enabled) {
+    VkLayerDeviceLink link = {.pfnNextGetInstanceProcAddr = ngipa,
+                              .pfnNextGetDeviceProcAddr = ngdpa};
+    VkLayerDeviceCreateInfo lc = {.sType = VK_STRUCTURE_TYPE_LOADER_DEVICE_CREATE_INFO,
+                                  .function = VK_LAYER_LINK_INFO,
+                                  .u.pLayerInfo = &link};
+    const char *extensions[] = {MAP2};
+    VkDeviceCreateInfo ci = {.sType = VK_STRUCTURE_TYPE_DEVICE_CREATE_INFO,
+                             .pNext = &lc,
+                             .enabledExtensionCount = enabled ? 1 : 0,
+                             .ppEnabledExtensionNames = extensions};
+    expect_filtered = 0;
+    VkDevice out;
+    assert(l_CreateDevice(P, &ci, &callbacks, &out) == VK_SUCCESS && out == D);
+}
+static void test_map2_only(void) {
+    for (int route = 0; route < 3; route++) {
+        int native = route != 0;
+        have_native_map2 = route == 1;
+        core_map2_only = route == 2;
+        setup(1);
+        uint32_t count = 4;
+        VkExtensionProperties extensions[4];
+        assert(l_EnumerateDeviceExtensionProperties(P, NULL, &count, extensions) == VK_SUCCESS);
+        unsigned map2_count = 0;
+        for (uint32_t j = 0; j < count; j++)
+            map2_count += !strcmp(extensions[j].extensionName, MAP2);
+        assert(map2_count == 1);
+        create_map2_device(1);
+        PFN_vkMapMemory2KHR map = (void *)l_GetDeviceProcAddr(D, "vkMapMemory2KHR");
+        PFN_vkUnmapMemory2KHR unmap = (void *)l_GetDeviceProcAddr(D, "vkUnmapMemory2KHR");
+        assert(map && unmap);
+        assert((PFN_vkVoidFunction)map == l_GetDeviceProcAddr(D, "vkMapMemory2"));
+        assert((PFN_vkVoidFunction)unmap == l_GetDeviceProcAddr(D, "vkUnmapMemory2"));
+        assert(forwarded_extension_count == (unsigned)have_native_map2);
+        assert(device_map2_enabled == have_native_map2 && !forwarded_fd && !forwarded_placed);
+        assert(l_GetDeviceProcAddr(D, "vkCreateBuffer") == (PFN_vkVoidFunction)nab);
+        assert(l_GetDeviceProcAddr(D, "vkAllocateMemory") == (PFN_vkVoidFunction)na);
+        assert(!get_device(D)->active && !get_device(D)->placed && !get_device(D)->reserve);
+        VkMemoryAllocateInfo allocation = {.sType = VK_STRUCTURE_TYPE_MEMORY_ALLOCATE_INFO,
+                                            .allocationSize = 4096,
+                                            .memoryTypeIndex = 1};
+        VkDeviceMemory memory;
+        assert(l_AllocateMemory(D, &allocation, &callbacks, &memory) == VK_SUCCESS);
+        assert(!last_export && !get_device(D)->memories);
+        VkMemoryMapInfoKHR mi = {.sType = VK_STRUCTURE_TYPE_MEMORY_MAP_INFO_KHR,
+                                 .memory = memory, .offset = 128, .size = 256};
+        VkMemoryUnmapInfoKHR ui = {.sType = VK_STRUCTURE_TYPE_MEMORY_UNMAP_INFO_KHR,
+                                   .memory = memory};
+        unsigned maps_before = native_map2_calls, unmaps_before = native_unmap2_calls;
+        void *out = NULL;
+        assert(map(D, &mi, &out) == VK_SUCCESS && out);
+        assert(out == (char *)((struct native_memory *)memory)->map + mi.offset);
+        memset(out, 0x29, (size_t)mi.size);
+        assert(unmap(D, &ui) == VK_SUCCESS);
+        if (native) {
+            assert(native_map2_calls == maps_before + 1 && native_map2_info == &mi);
+            assert(native_unmap2_calls == unmaps_before + 1 && native_unmap2_info == &ui);
+        } else {
+            assert(native_map2_calls == maps_before && native_unmap2_calls == unmaps_before);
+            mi.flags = VK_MEMORY_MAP_PLACED_BIT_EXT;
+            assert(map(D, &mi, &out) == VK_ERROR_MEMORY_MAP_FAILED);
+            mi.flags = 0;
+            VkMemoryMapPlacedInfoEXT placed = {.sType = VK_STRUCTURE_TYPE_MEMORY_MAP_PLACED_INFO_EXT};
+            mi.pNext = &placed;
+            assert(map(D, &mi, &out) == VK_ERROR_MEMORY_MAP_FAILED);
+            mi.pNext = NULL;
+            assert(map(D, &mi, &out) == VK_SUCCESS);
+            ui.flags = VK_MEMORY_UNMAP_RESERVE_BIT_EXT;
+            assert(unmap(D, &ui) == VK_ERROR_MEMORY_MAP_FAILED);
+            assert((char *)((struct native_memory *)memory)->map + mi.offset == out);
+            ui.flags = 0;
+            assert(unmap(D, &ui) == VK_SUCCESS);
+        }
+        /* Instance dispatch also enters our wrapper on native-only devices. */
+        map = (void *)l_GetInstanceProcAddr(I, "vkMapMemory2");
+        unmap = (void *)l_GetInstanceProcAddr(I, "vkUnmapMemory2KHR");
+        assert(map && unmap && map(D, &mi, &out) == VK_SUCCESS);
+        assert(unmap(D, &ui) == VK_SUCCESS);
+        l_FreeMemory(D, memory, &callbacks);
+        teardown();
+
+        setup(1);
+        create_map2_device(0);
+        assert(!l_GetDeviceProcAddr(D, "vkMapMemory2KHR"));
+        assert(l_GetDeviceProcAddr(D, "vkUnmapMemory2") ==
+               (core_map2_only ? (PFN_vkVoidFunction)nu2 : NULL));
+        assert(!forwarded_extension_count && !get_device(D)->active);
+        teardown();
+    }
+    have_native_map2 = core_map2_only = 0;
+    assert(native_maps == native_unmaps);
+    puts("PASS map2 only: emulated/native core and KHR dispatch, extension filtering, "
+         "native resources, unsupported placed flags rejected, disabled extension stays disabled");
+}
+static void test_disabled_placed_features(void) {
+    for (int native = 0; native < 2; native++) {
+        have_native_map2 = native;
+        setup(1);
+        create_device_features(1, 0);
+        assert(device_map2_enabled == native && forwarded_fd && !forwarded_placed);
+        assert(forwarded_extension_count == 1u + native);
+        VkMemoryAllocateInfo allocation = {.sType = VK_STRUCTURE_TYPE_MEMORY_ALLOCATE_INFO,
+                                            .allocationSize = 4096,
+                                            .memoryTypeIndex = 1};
+        VkDeviceMemory memory;
+        assert(l_AllocateMemory(D, &allocation, &callbacks, &memory) == VK_SUCCESS);
+        VkMemoryMapInfoKHR mi = {.sType = VK_STRUCTURE_TYPE_MEMORY_MAP_INFO_KHR,
+                                 .memory = memory, .size = VK_WHOLE_SIZE};
+        VkMemoryUnmapInfoKHR ui = {.sType = VK_STRUCTURE_TYPE_MEMORY_UNMAP_INFO_KHR,
+                                   .memory = memory};
+        void *out = NULL;
+        mi.flags = VK_MEMORY_MAP_PLACED_BIT_EXT;
+        assert(l_MapMemory2KHR(D, &mi, &out) == VK_ERROR_MEMORY_MAP_FAILED);
+        mi.flags = 0;
+        assert(l_MapMemory2KHR(D, &mi, &out) == VK_SUCCESS && out);
+        ui.flags = VK_MEMORY_UNMAP_RESERVE_BIT_EXT;
+        assert(l_UnmapMemory2KHR(D, &ui) == VK_ERROR_MEMORY_MAP_FAILED);
+        ui.flags = 0;
+        assert(l_UnmapMemory2KHR(D, &ui) == VK_SUCCESS);
+        l_FreeMemory(D, memory, &callbacks);
+        teardown();
+    }
+    have_native_map2 = 0;
+    puts("PASS placed features disabled: native map2 extension preserved, ordinary mapping works, "
+         "placement and reservation stay disabled");
 }
 static void test_resources(void) {
     setup(1);
@@ -1062,6 +1226,8 @@ int main(int argc, char **argv) {
         else assert(!"unexpected test mode");
     } else assert(argc == 1);
     test_dispatch();
+    test_map2_only();
+    test_disabled_placed_features();
     test_resources();
     test_mapping();
     test_concurrency();

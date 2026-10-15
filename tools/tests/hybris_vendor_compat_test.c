@@ -32,6 +32,7 @@ static int instance_ext_proc = 1;
 static int features2_core_proc = 1, features2_khr_proc = 1;
 static uint64_t next_sampler = 0x100;
 static VkSampler driver_ycbcr, driver_layout_sampler;
+static int driver_layout_calls;
 static int ext_domain_calls, ext_timestamp_calls;
 static int native_domain_calls, native_timestamp_calls;
 static int allocations, frees, fail_allocation = -1;
@@ -168,6 +169,7 @@ static VkResult VKAPI_CALL create_layout(VkDevice handle,
     const VkDescriptorSetLayoutCreateInfo *info, const VkAllocationCallbacks *allocator,
     VkDescriptorSetLayout *out)
 {
+    ++driver_layout_calls;
     assert(info->bindingCount == 2);
     assert(info->pBindings[0].descriptorType == VK_DESCRIPTOR_TYPE_SAMPLED_IMAGE);
     assert(info->pBindings[0].pImmutableSamplers == (const VkSampler *)(uintptr_t)1);
@@ -249,9 +251,15 @@ void hybris_scaled_free(const VkAllocationCallbacks *allocator, void *memory)
 static void *VKAPI_PTR test_allocate(void *data, size_t size, size_t alignment,
     VkSystemAllocationScope scope)
 {
-    if (fail_allocation == allocations) return NULL;
+    if (fail_allocation == allocations) {
+        fail_allocation = -1;
+        return NULL;
+    }
+    void *memory = malloc(size);
+    assert(memory);
+    memset(memory, 0xa5, size);
     ++allocations;
-    return calloc(1, size);
+    return memory;
 }
 static void VKAPI_PTR test_free(void *data, void *memory)
 {
@@ -277,6 +285,7 @@ static void reset_configs(void)
     features2_core_proc = features2_khr_proc = 1;
     next_sampler = 0x100;
     driver_ycbcr = driver_layout_sampler = VK_NULL_HANDLE;
+    driver_layout_calls = 0;
     ext_domain_calls = ext_timestamp_calls = 0;
     native_domain_calls = native_timestamp_calls = 0;
 }
@@ -394,10 +403,16 @@ static void test_xclipse_workarounds(void)
     assert(layout(device[0], &layout_info, &allocator, &set_layout) == VK_SUCCESS);
     assert(driver_layout_sampler != ycbcr && immutable[0] == ycbcr);
     int live = allocations - frees;
-    fail_allocation = allocations + 1;
-    assert(layout(device[0], &layout_info, &allocator, &set_layout) == VK_ERROR_OUT_OF_HOST_MEMORY);
-    fail_allocation = -1;
-    assert(allocations - frees == live);
+    int layout_calls = driver_layout_calls;
+    for (int failure = 0; failure < 3; ++failure) {
+        fail_allocation = allocations + failure;
+        assert(layout(device[0], &layout_info, &allocator, &set_layout) ==
+            VK_ERROR_OUT_OF_HOST_MEMORY);
+        assert(fail_allocation == -1 && allocations - frees == live);
+        assert(driver_layout_calls == layout_calls && immutable[0] == ycbcr);
+    }
+    assert(layout(device[0], &layout_info, &allocator, &set_layout) == VK_SUCCESS);
+    assert(driver_layout_calls == layout_calls + 1 && allocations - frees == live);
     PFN_vkDestroySampler destroy = (PFN_vkDestroySampler)
         hybris_vendor_device_proc("vkDestroySampler");
     destroy(device[0], ycbcr, &allocator);
