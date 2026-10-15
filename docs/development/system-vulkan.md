@@ -162,8 +162,8 @@ Android compositor
 
 The app selects the shared `VK_LAYER_HYBRIS_compat` layer for all three profiles;
 it no longer stages or enables a standalone Xclipse layer. The runtime uses
-[component release `33279121`](https://github.com/wallentx/DroidDeck/releases/tag/hybris-332791218632d8981789267249fde77aedc71bfd),
-built by [component CI](https://github.com/wallentx/DroidDeck/actions/runs/38645156760).
+[component release `4073873b`](https://github.com/wallentx/DroidDeck/releases/tag/hybris-4073873b9c8986740a17aa81d5952dad3a23a44c),
+built by [component CI](https://github.com/wallentx/DroidDeck/actions/runs/38685372864).
 `tools/powervr/release.json` records the verified archive and tree checksums, recipe
 inputs, producer commit, and upstream source revision.
 
