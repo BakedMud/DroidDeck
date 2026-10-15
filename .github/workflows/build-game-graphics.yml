@@ -138,6 +138,7 @@ jobs:
             command -v docker
           fi
       - name: Build and record
+        id: component
         env:
           COMPONENT: ${{ matrix.component }}
           SOURCE_COMMIT: ${{ needs.resolve.outputs.commit }}
@@ -153,6 +154,17 @@ jobs:
             --build-dir "$PWD/out/build" \
             --output "$PWD/out/component" \
             --source-record "$PWD/source.json"
+      - name: Preserve component archives after a packaging failure
+        if: failure() && steps.component.outcome == 'failure'
+        uses: actions/upload-artifact@v7
+        with:
+          name: graphics-raw-${{ matrix.component }}
+          path: |
+            out/build/*.tzst
+            out/build/*.tar.gz
+            out/build/*.tar.zst
+          if-no-files-found: ignore
+          retention-days: 7
       - name: Collect WSI validation layer
         if: matrix.component == 'wsi'
         run: |

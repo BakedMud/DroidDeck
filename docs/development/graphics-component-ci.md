@@ -34,6 +34,9 @@ creates a draft prerelease, uploads all assets, compares downloaded bytes, and
 publishes without changing the latest release. Public downloads are checked
 without authentication. A failed upload or draft validation leaves the draft for
 inspection; retry with a new tag rather than replacing published bytes.
+If packaging fails after compilation, completed compressed archives are retained
+for seven days in `graphics-raw-<component>` artifacts for diagnosis. Publication
+still requires the normal component and clean-source validation steps.
 
 ```text
 requested branch / commit / PR

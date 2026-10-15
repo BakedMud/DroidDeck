@@ -302,6 +302,42 @@ class GraphicsComponentRecordTest(unittest.TestCase):
         with self.assertRaisesRegex(ValueError, "wrong PE architecture"):
             record._validate_pe("dxvk-mali", entries, files)
 
+    def test_mali_raw_archive_strips_only_experimental_root(self):
+        files = {
+            "LICENSE": b"license",
+            "dxvk-mali/i386-windows/d3d8.dll": b"dll",
+            "provenance/pe-imports.json": b"imports",
+            "run-proton.py": b"wrapper",
+        }
+        raw_sums = "".join(
+            f"{record.sha256(content)}  {name}\n"
+            for name, content in sorted(files.items())
+        ).encode()
+        combined = {
+            "baseline/LICENSE": ("file", 0o644, b"baseline"),
+            **{
+                f"experimental/{name}": ("file", 0o755 if name.endswith(".py") else 0o644, content)
+                for name, content in files.items()
+            },
+            "experimental/SHA256SUMS": ("file", 0o644, raw_sums),
+        }
+        allowed = {
+            "LICENSE", "dxvk-mali/i386-windows/d3d8.dll",
+            "provenance/pe-imports.json", "SHA256SUMS",
+        }
+        normalized = record._mali_experimental_entries(combined, allowed)
+        self.assertEqual(set(normalized), allowed)
+        sums = record._checksum_inventory(normalized["SHA256SUMS"][2], "normalized Mali DXVK")
+        self.assertEqual(sums, {
+            name: record.sha256(normalized[name][2]) for name in allowed - {"SHA256SUMS"}
+        })
+        self.assertNotIn("run-proton.py", sums)
+
+        broken = dict(combined)
+        broken["experimental/run-proton.py"] = ("file", 0o755, b"changed wrapper")
+        with self.assertRaisesRegex(ValueError, "raw Mali DXVK checksum inventory differs"):
+            record._mali_experimental_entries(broken, allowed)
+
     def test_verify_rejects_forged_pin_inventory(self):
         result = self.create_dxvk()
         forged = copy.deepcopy(result)

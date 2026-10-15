@@ -615,10 +615,7 @@ def _validate_mali(source: Path, entries) -> None:
         name: sha256(content) for name, (kind, _, content) in entries.items()
         if kind == "file" and name != "SHA256SUMS"
     }
-    # The producer checksum also covers run-proton.py. The APK already carries
-    # its reviewed wrapper separately, so the release mapping intentionally
-    # omits that file while retaining the producer's complete inventory.
-    if any(checksums.get(name) != digest for name, digest in actual.items()):
+    if checksums != actual:
         raise ValueError("Mali DXVK checksum inventory differs")
 
 
@@ -696,6 +693,36 @@ def _directory_entries(directory: Path) -> dict[str, tuple[str, int, bytes | str
     return entries
 
 
+def _mali_experimental_entries(combined_entries, allowed):
+    prefix = "experimental/"
+    entries = {
+        name.removeprefix(prefix): value
+        for name, value in combined_entries.items()
+        if name.startswith(prefix)
+    }
+    if not entries:
+        raise ValueError("Mali DXVK build output has no experimental payload")
+    raw_checksums = _checksum_inventory(_read_entry(entries, "SHA256SUMS"), "raw Mali DXVK")
+    raw_actual = {
+        name: sha256(content) for name, (kind, _, content) in entries.items()
+        if kind == "file" and name != "SHA256SUMS"
+    }
+    if raw_checksums != raw_actual:
+        raise ValueError("raw Mali DXVK checksum inventory differs")
+    missing = set(allowed) - set(entries)
+    if missing:
+        raise ValueError(f"Mali DXVK build output is missing mapped files: {sorted(missing)}")
+    normalized = {name: value for name, value in entries.items() if name in allowed}
+    checksum_mode = normalized["SHA256SUMS"][1]
+    checksum_data = "".join(
+        f"{sha256(content)}  {name}\n"
+        for name, (kind, _, content) in sorted(normalized.items())
+        if kind == "file" and name != "SHA256SUMS"
+    ).encode()
+    normalized["SHA256SUMS"] = ("file", checksum_mode, checksum_data)
+    return normalized
+
+
 def _source_identity(source_record: dict) -> tuple[dict, dict]:
     source_record = _object(source_record, "source record")
     repository = source_record.get("repository")
@@ -748,20 +775,9 @@ def create_record(component: str, source: Path, build_dir: Path, output: Path, s
         if not combined.is_file():
             raise ValueError("Mali DXVK build output is missing dxvk-mali-payloads.tar.zst")
         combined_entries = _read_archive(combined.read_bytes(), combined.name)
-        prefix = "experimental/dxvk-mali/"
-        entries = {
-            name.removeprefix(prefix): value
-            for name, value in combined_entries.items()
-            if name.startswith(prefix)
-        }
-        if not entries:
-            raise ValueError("Mali DXVK build output has no experimental payload")
         assert archive_template is not None
         allowed = {item["name"] for item in archive_template["files"]} | set(archive_template["ignored"])
-        missing = allowed - set(entries)
-        if missing:
-            raise ValueError(f"Mali DXVK build output is missing mapped files: {sorted(missing)}")
-        entries = {name: value for name, value in entries.items() if name in allowed}
+        entries = _mali_experimental_entries(combined_entries, allowed)
         _write_zip(asset_path, entries)
     else:
         source_name = {
