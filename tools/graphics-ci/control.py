@@ -248,7 +248,17 @@ def publication_env(source, env=os.environ):
 
 
 def verify_remote_assets(repo, tag, assets, env):
-    release = api(f"repos/{repo}/releases/tags/{urllib.parse.quote(tag, safe='')}", env)
+    # REST get-by-tag exposes published releases only. gh can resolve a draft,
+    # whose numeric release endpoint remains readable during verification.
+    lookup = json.loads(run("gh", "release", "view", tag, "--repo", repo, "--json", "apiUrl,tagName", env=env))
+    url = urllib.parse.urlsplit(lookup["apiUrl"])
+    expected_path = re.escape(f"/repos/{repo}/releases/") + r"[1-9][0-9]*"
+    if (lookup["tagName"] != tag or url.scheme != "https" or url.netloc != "api.github.com"
+            or url.query or url.fragment or not re.fullmatch(expected_path, url.path, flags=re.IGNORECASE)):
+        raise ValueError("release lookup returned an unexpected identity")
+    release = api(url.path.lstrip("/"), env)
+    if release["tag_name"] != tag:
+        raise ValueError("release tag changed during verification")
     actual = {a["name"]: a for a in release["assets"]}
     if set(actual) != {p.name for p in assets}:
         raise ValueError("uploaded asset list differs from the validated bundle")

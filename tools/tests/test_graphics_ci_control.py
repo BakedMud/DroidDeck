@@ -132,6 +132,25 @@ class PublicationBoundaryTests(unittest.TestCase):
             self.assertEqual(command.call_count, 1)
             self.assertEqual(command.call_args.args[:3], ("gh", "api", "graphql"))
 
+    def test_draft_verification_uses_numeric_release_endpoint(self):
+        lookup = {"apiUrl": "https://api.github.com/repos/owner/repo/releases/123", "tagName": "graphics-test"}
+        release = {"tag_name": "graphics-test", "draft": True, "assets": []}
+        with patch.object(control, "run", return_value=json.dumps(lookup)), \
+                patch.object(control, "api", return_value=release) as request:
+            self.assertEqual(control.verify_remote_assets("owner/repo", "graphics-test", [], {}), release)
+            request.assert_called_once_with("repos/owner/repo/releases/123", {})
+
+    def test_draft_lookup_cannot_redirect_authenticated_verification(self):
+        for url in ("https://evil.example/repos/owner/repo/releases/123",
+                    "https://api.github.com/repos/other/repo/releases/123",
+                    "https://api.github.com/repos/owner/repo/releases/123?redirect=1"):
+            lookup = {"apiUrl": url, "tagName": "graphics-test"}
+            with patch.object(control, "run", return_value=json.dumps(lookup)), \
+                    patch.object(control, "api") as request:
+                with self.assertRaisesRegex(ValueError, "unexpected identity"):
+                    control.verify_remote_assets("owner/repo", "graphics-test", [], {})
+                request.assert_not_called()
+
     def test_bundle_tamper_and_extra_assets_rejected(self):
         with tempfile.TemporaryDirectory() as temp:
             root = Path(temp)
