@@ -449,6 +449,16 @@ object SessionPrefs {
 
     fun setLogsEnabled(context: Context, on: Boolean) {
         prefs(context).edit().putBoolean("logs", on).apply()
+        publishGameEnvironment(context)
+    }
+
+    /** Extra Proton, Wine and graphics diagnostics for the next game launch; off unless chosen. */
+    fun gameDebugLogsEnabled(context: Context): Boolean =
+        prefs(context).getBoolean("gameDebugLogsEnabled", false)
+
+    fun setGameDebugLogsEnabled(context: Context, on: Boolean) {
+        prefs(context).edit().putBoolean("gameDebugLogsEnabled", on).apply()
+        publishGameEnvironment(context)
     }
 
     fun storageDiagnosticsEnabled(context: Context): Boolean =

@@ -44,6 +44,7 @@ import com.droiddeck.launcher.session.ComponentsManager
 import com.droiddeck.launcher.ui.ComponentsPage
 import com.droiddeck.launcher.session.GameSaves
 import com.droiddeck.launcher.session.SessionLogShare
+import com.droiddeck.launcher.session.SessionPaths
 import com.droiddeck.launcher.session.SessionPrefs
 import com.droiddeck.launcher.session.SteamRepair
 import com.droiddeck.launcher.core.CpuCores
@@ -351,6 +352,8 @@ class MainActivity : ComponentActivity() {
     private var emulatorList by mutableStateOf<List<Library.Emulator>>(emptyList())
     private var runningLabel by mutableStateOf<String?>(null)
     private var logsEnabled by mutableStateOf(true)
+    private var gameDebugLogsEnabled by mutableStateOf(false)
+    private var gameDebugLogsNeedsRestart by mutableStateOf(false)
     private var agentCommands by mutableStateOf(false)
     private var showRoms by mutableStateOf(false)
     private var homeAppSelected by mutableStateOf(false)
@@ -542,7 +545,7 @@ class MainActivity : ComponentActivity() {
                         busy = busy, stage = stage, percent = percent,
                         desktopInstalled = desktopInstalled, desktopPresent = desktopPresent,
                         offlineAccount = offlineAccount, offline = offline,
-                        frameGenLabel = frameGenLabel, romsDir = romsDir, logsEnabled = logsEnabled, agentCommands = agentCommands,
+                        frameGenLabel = frameGenLabel, romsDir = romsDir, logsEnabled = logsEnabled, gameDebugLogsEnabled = gameDebugLogsEnabled, gameDebugLogsNeedsRestart = gameDebugLogsNeedsRestart, agentCommands = agentCommands,
                         steamGames = steamGames, emulators = emulatorList, running = runningLabel,
                         frameGen = FrameGen.mode(this),
                         lossless = lossless,
@@ -679,6 +682,13 @@ class MainActivity : ComponentActivity() {
                         onLogs = {
                             SessionPrefs.setLogsEnabled(this, !SessionPrefs.logsEnabled(this))
                             logsEnabled = SessionPrefs.logsEnabled(this)
+                            gameDebugLogsEnabled = SessionPrefs.gameDebugLogsEnabled(this)
+                            gameDebugLogsNeedsRestart = gameDebugLogsNeedsRestart()
+                        },
+                        onGameDebugLogs = {
+                            SessionPrefs.setGameDebugLogsEnabled(this, !SessionPrefs.gameDebugLogsEnabled(this))
+                            gameDebugLogsEnabled = SessionPrefs.gameDebugLogsEnabled(this)
+                            gameDebugLogsNeedsRestart = gameDebugLogsNeedsRestart()
                         },
                         onAgentCommands = {
                             com.droiddeck.launcher.agent.AgentAccess.setCommandsEnabled(this, !com.droiddeck.launcher.agent.AgentAccess.commandsEnabled(this))
@@ -1535,6 +1545,10 @@ class MainActivity : ComponentActivity() {
         refreshPhantomStatus()
     }
 
+    private fun gameDebugLogsNeedsRestart(): Boolean =
+        SessionPrefs.logsEnabled(this) && SessionPrefs.gameDebugLogsEnabled(this) &&
+            !SessionPaths.currentSessionLogsRetained(this)
+
     private fun refresh() {
         if (!busy && LinuxRuntimeInstaller.isBusy()) followRuntimeOperation { LinuxRuntimeInstaller.attach(it) }
         addedGamesArt = SessionPrefs.addedGamesArt(this)
@@ -1548,6 +1562,8 @@ class MainActivity : ComponentActivity() {
         frameGenLabel = FrameGen.label(this)
         romsDir = SessionPrefs.romsDir(this).takeIf { it.isNotEmpty() }
         logsEnabled = SessionPrefs.logsEnabled(this)
+        gameDebugLogsEnabled = SessionPrefs.gameDebugLogsEnabled(this)
+        gameDebugLogsNeedsRestart = gameDebugLogsNeedsRestart()
         agentCommands = com.droiddeck.launcher.agent.AgentAccess.commandsEnabled(this)
         runningLabel = if (SessionState.running) when (SessionState.mode) {
             SessionService.MODE_DESKTOP -> getString(R.string.rail_desktop)
