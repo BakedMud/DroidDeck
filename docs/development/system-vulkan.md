@@ -51,6 +51,36 @@ not describe its current selection. The old
 `DROIDDECK_POWERVR_RUNTIME` alias remains available for PowerVR and Xclipse helpers.
 Manual driver selections retain their existing behavior.
 
+### BC decoding and push descriptors
+
+The BC compatibility layer preserves native `VK_KHR_push_descriptor` support.
+It records owned copies of compute push descriptors and restores them after its
+decoder uses the compute pipeline. Both direct and template commands are covered,
+including the `maintenance6` entry points. Template and pipeline-layout shadows
+remain alive while a command buffer references them; replay of a mixed shader-stage
+mask restores compute state only.
+
+The layer forwards graphics-only pushes and inactive BC paths without recording
+compute state. It retains the native extension revision and descriptor limit;
+it does not add push-descriptor support to drivers that lack it. The DXVK profile
+still reports Vulkan 1.3 because other Vulkan 1.4 operations remain outside the
+decoder's tracking.
+
+The focused test compiles the patched production C files. Set `HYBRIS_PUSH_SOURCE`
+to a clean checkout of the revision in `tools/hybris/source.env`, then run:
+
+```sh
+python3 -m unittest tools.tests.test_hybris_push_descriptors
+```
+
+Component CI also builds `probes/probe-glibc`, with its build manifest and checksums.
+The opt-in `bc-images-push-control-validation` and `bc-images-push-validation`
+modes use the same Direct3D BC formats and `maintenance6` settings. The latter
+exercises direct, template, and both newer KHR routes, clears caller-owned data,
+and destroys application templates and layouts before submission. Texture readback
+after BC uploads verifies that descriptor restoration survives actual decoder work.
+Run these with `HYBRIS_BC_TEXTURES=dxvk` and the selected runtime's ICD and layers.
+
 ### 32-bit Windows memory mappings
 
 Wine's WoW64 Vulkan path requires mapped memory below 4 GiB. On the tested

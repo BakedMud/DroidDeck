@@ -28,6 +28,16 @@ python3 -m unittest discover \
   -s "$root/tools/tests" -p test_hybris_inline_shader.py
 HYBRIS_CLIP_SOURCE="$work/libhybris" python3 -m unittest discover \
   -s "$root/tools/tests" -p test_hybris_clip_shader.py
+export CONTAINER_ENGINE=podman
+builder_image="${BUILDER_IMAGE:-}"
+if [[ -z "$builder_image" ]]; then
+  builder_image="$("$work/libhybris/tools/ensure-builder.sh")"
+fi
+mkdir -p "$work/vulkan-headers"
+"$CONTAINER_ENGINE" run --rm --network none "$builder_image" \
+  tar -C /usr/include -cf - vulkan vk_video | tar -C "$work/vulkan-headers" -xf -
+HYBRIS_PUSH_SOURCE="$work/libhybris" VULKAN_INCLUDE="$work/vulkan-headers" python3 -m unittest discover \
+  -s "$root/tools/tests" -p test_hybris_push_descriptors.py
 git -C "$work/libhybris" apply --check "$root/tools/hybris/powervr-hal-version.patch"
 git -C "$work/libhybris" apply "$root/tools/hybris/powervr-hal-version.patch"
 for patch in "$root"/tools/hybris/patches/*.patch; do
@@ -37,8 +47,19 @@ done
 # Include new source files in the patch shipped with the runtime's licenses.
 git -C "$work/libhybris" add --intent-to-add .
 export ARLINUX_WSI_PROTOCOL_DIR="$work/rootfs/graphics-protocols"
-export CONTAINER_ENGINE=podman
 "$work/libhybris/tools/build-aarch64.sh" --out "$work/build"
+
+ndk="${ANDROID_NDK_LATEST_HOME:-${ANDROID_NDK_HOME:-${ANDROID_NDK_ROOT:-}}}"
+if [[ -z "$ndk" ]]; then
+  echo 'An Android NDK is required to build the BC push-descriptor probes.' >&2
+  exit 1
+fi
+OUT="$work/build" \
+  BIONIC_CC="$ndk/toolchains/llvm/prebuilt/linux-x86_64/bin/aarch64-linux-android26-clang" \
+  "$work/libhybris/tests/baseline/build.sh"
+mkdir -p "$out/probes"
+cp "$work/build/bundle/probe-glibc" "$work/build/bundle/probe-manifest.json" "$out/probes/"
+(cd "$out/probes" && sha256sum probe-glibc probe-manifest.json > SHA256SUMS)
 
 mkdir -p "$work/package/lib" "$work/package/licenses"
 python3 "$root/tools/hybris/component_record.py" --write-recipe "$work/package/build-recipe.json"
