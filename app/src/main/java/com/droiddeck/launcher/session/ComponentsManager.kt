@@ -96,6 +96,7 @@ object ComponentsManager {
     data class Snapshot(val protons: List<ProtonView>, val packages: List<Package>)
     data class Catalog(
         val items: List<CatalogItem>, val fetchedAt: Long, val failed: List<String> = emptyList(),
+        val rateLimited: Boolean = false,
     )
 
     private val lock = Any()
@@ -965,6 +966,7 @@ object ComponentsManager {
         val items = ArrayList<CatalogItem>()
         var fetchedAt = 0L
         val failed = ArrayList<String>()
+        var rateLimited = false
         val legacy by lazy { readLegacyCatalog(context) }
         for (comp in COMPONENTS) {
             val scope = sourceScope(comp)
@@ -984,6 +986,7 @@ object ComponentsManager {
                     }.onSuccess {
                         cached = it
                     }.onFailure {
+                        rateLimited = rateLimited || GitHubArtifacts.isRateLimited(it)
                         failed.add("$comp:${configured.repository}")
                         Log.w(TAG, "catalog ${configured.repository} for $comp", it)
                     }
@@ -1000,6 +1003,7 @@ object ComponentsManager {
             items.distinctBy { it.id }.sortedWith(compareBy<CatalogItem> { it.comp }.then(newestFirst { it.file })),
             fetchedAt,
             failed,
+            rateLimited,
         )
     }
 

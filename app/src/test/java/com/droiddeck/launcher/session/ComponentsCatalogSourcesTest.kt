@@ -2,6 +2,7 @@ package com.droiddeck.launcher.session
 
 import android.content.Context
 import com.droiddeck.launcher.artifact.RepositorySources
+import com.droiddeck.launcher.artifact.GitHubArtifacts
 import com.droiddeck.launcher.core.Hashes
 import com.github.luben.zstd.ZstdOutputStream
 import org.apache.commons.compress.archivers.tar.TarArchiveEntry
@@ -78,6 +79,22 @@ class ComponentsCatalogSourcesTest {
         assertTrue(result.items.isEmpty())
         assertEquals(0L, result.fetchedAt)
         assertEquals(3, result.failed.size)
+    }
+
+    @Test
+    fun rateLimitSurvivesPerSourceFailuresWithoutDiscardingCachedItems() {
+        bindBuiltIns()
+        ComponentsManager.catalogRefresher = { _, comp, source -> listOf(item(comp, source, "$comp.wcp")) }
+        val cached = ComponentsManager.catalog(context, true)
+        ComponentsManager.catalogRefresher = { _, comp, _ ->
+            if (comp == ComponentsManager.COMPONENTS.first()) throw IOException("wrapped", GitHubArtifacts.RateLimitException(Long.MAX_VALUE))
+            throw IOException("offline")
+        }
+        val failed = ComponentsManager.catalog(context, true)
+        assertTrue(failed.rateLimited)
+        assertEquals(cached.items.map { it.id }, failed.items.map { it.id })
+        assertEquals(cached.fetchedAt, failed.fetchedAt)
+        assertFalse(ComponentsManager.catalog(context, false).rateLimited)
     }
 
     @Test

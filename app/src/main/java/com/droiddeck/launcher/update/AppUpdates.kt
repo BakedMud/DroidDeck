@@ -255,9 +255,14 @@ object AppUpdates {
         val source = RepositorySources.visible(context, SOURCE_SCOPE, sourceBuiltIns()).singleOrNull { it.id == sourceId }
             ?: throw IOException("The selected update source is hidden or unavailable")
         val checkedAt = System.currentTimeMillis()
-        val published = JSONObject(GitHubArtifacts.readRepositoryFile(
-            context, SOURCE_SCOPE, sourceBuiltIns(), source, "catalog.json", "main", 1024 * 1024,
-        ).toString(Charsets.UTF_8))
+        val published = try {
+            JSONObject(GitHubArtifacts.readRepositoryFile(
+                context, SOURCE_SCOPE, sourceBuiltIns(), source, "catalog.json", "main", 1024 * 1024,
+            ).toString(Charsets.UTF_8))
+        } catch (error: GitHubArtifacts.HttpException) {
+            if (error.status == 404) throw IOException(context.getString(R.string.sources_update_catalog_missing), error)
+            throw error
+        }
         val catalog = try {
             readPublishedCatalog(published, context.packageName, checkedAt, expectedSourceRepo = null,
                 expectedCiRepo = source.repository, sourceId = source.id)

@@ -2,6 +2,8 @@ package com.droiddeck.launcher.update
 
 import com.droiddeck.launcher.BuildConfig
 import com.droiddeck.launcher.artifact.RepositorySources
+import com.droiddeck.launcher.artifact.GitHubArtifacts
+import com.droiddeck.launcher.R
 import com.droiddeck.launcher.update.AppUpdates.Channel
 import com.droiddeck.launcher.update.AppUpdates.Follow
 import com.droiddeck.launcher.update.AppUpdates.Installed
@@ -20,6 +22,7 @@ import org.junit.runner.RunWith
 import org.robolectric.RobolectricTestRunner
 import org.robolectric.RuntimeEnvironment
 import java.io.IOException
+import java.net.HttpURLConnection
 
 @RunWith(RobolectricTestRunner::class)
 class AppUpdatesTest {
@@ -319,5 +322,34 @@ class AppUpdatesTest {
             if (it.id == official.id) it.copy(hidden = false) else it
         })
         assertNotNull(AppUpdates.cached(context, official.id))
+    }
+
+    @Test
+    fun missingCatalogAndRateLimitReportDifferentErrorsAndPreserveCachedUpdate() {
+        val context = RuntimeEnvironment.getApplication()
+        val source = AppUpdates.sources(context).single()
+        val cachedJson = AppUpdates.writeCatalog(catalog).toString()
+        val prefs = context.getSharedPreferences("app_updates", 0)
+        prefs.edit().putString("catalog:${source.id}", cachedJson).commit()
+        val production = GitHubArtifacts.openConnection
+        try {
+            for (status in listOf(404, 429)) {
+                GitHubArtifacts.clearRateLimits()
+                GitHubArtifacts.openConnection = { url -> object : HttpURLConnection(url) {
+                    override fun connect() {}
+                    override fun disconnect() {}
+                    override fun usingProxy() = false
+                    override fun getResponseCode() = status
+                } }
+                val error = runCatching { AppUpdates.refresh(context, source.id) }.exceptionOrNull()!!
+                if (status == 404) assertEquals(context.getString(R.string.sources_update_catalog_missing), error.message)
+                else assertTrue(GitHubArtifacts.isRateLimited(error))
+                assertEquals(cachedJson, prefs.getString("catalog:${source.id}", null))
+                assertEquals(catalog.stable!!.tag, AppUpdates.cached(context, source.id)!!.stable!!.tag)
+            }
+        } finally {
+            GitHubArtifacts.openConnection = production
+            GitHubArtifacts.clearRateLimits()
+        }
     }
 }

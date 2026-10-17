@@ -25,7 +25,8 @@ object TurnipReleases {
                 val releaseId: Long = 0, val assetId: Long = 0) {
         val id: String get() = if (sourceId.isEmpty()) name else "$sourceId:$assetId:$sha256"
     }
-    class Check(val assets: List<Asset>, val latest: List<Pair<String, String>>, val failed: List<String>, val checkedAt: Long)
+    class Check(val assets: List<Asset>, val latest: List<Pair<String, String>>, val failed: List<String>, val checkedAt: Long,
+                val rateLimited: Boolean = false)
 
     private class Kind(val linux: Boolean, val label: String, val pair: String, val bundle: Boolean = false)
 
@@ -82,6 +83,7 @@ object TurnipReleases {
         val latest = JSONArray()
         val failed = ArrayList<String>()
         var lastError: Exception? = null
+        var rateLimited = false
         for (configured in RepositorySources.visible(context, SOURCE_SCOPE, sourceBuiltIns())) {
             try {
                 val releases = GitHubArtifacts.refreshReleases(context, SOURCE_SCOPE, sourceBuiltIns(), configured)
@@ -113,7 +115,8 @@ object TurnipReleases {
                     .put("tag", newest).put("sourceId", source.id).put("repository", source.repository))
             } catch (e: Exception) {
                 failed.add(configured.repository)
-                lastError = e
+                if (lastError == null || GitHubArtifacts.isRateLimited(e)) lastError = e
+                rateLimited = rateLimited || GitHubArtifacts.isRateLimited(e)
                 previous?.assets?.filter { it.sourceId == configured.id }?.forEach { assets.put(encode(it)) }
                 val knownLabel = SOURCES.firstOrNull { it.repo == configured.repository }?.label
                 previous?.latest?.filter { it.first == knownLabel || it.first == configured.repository }?.forEach {
@@ -125,11 +128,12 @@ object TurnipReleases {
         if (failed.isNotEmpty() && failed.size == RepositorySources.visible(context, SOURCE_SCOPE, sourceBuiltIns()).size && assets.length() == 0) {
             throw lastError ?: IOException("no source answered")
         }
+        val allFailed = failed.isNotEmpty() && failed.size == RepositorySources.visible(context, SOURCE_SCOPE, sourceBuiltIns()).size
         val stored = JSONObject().put("assets", assets).put("latest", latest)
-            .put("failed", JSONArray(failed)).put("checkedAt", System.currentTimeMillis())
+            .put("failed", JSONArray(failed)).put("checkedAt", if (allFailed) previous?.checkedAt ?: 0L else System.currentTimeMillis())
         prefs(context).edit().putString(KEY_RELEASE, stored.toString()).apply()
         val current = RepositorySources.visible(context, SOURCE_SCOPE, sourceBuiltIns()).map { it.id }.toSet()
-        return parse(stored, current)
+        return parse(stored, current, rateLimited)
     }
 
     internal fun qualifiedPair(repository: String, sourceId: String, pair: String): String =
@@ -141,7 +145,7 @@ object TurnipReleases {
         .put("sourceId", a.sourceId).put("repository", a.repository).put("repositoryId", a.repositoryId)
         .put("releaseId", a.releaseId).put("assetId", a.assetId)
 
-    private fun parse(json: JSONObject, visible: Set<String>?): Check {
+    private fun parse(json: JSONObject, visible: Set<String>?, rateLimited: Boolean = false): Check {
         val out = ArrayList<Asset>()
         val list = json.getJSONArray("assets")
         for (i in 0 until list.length()) {
@@ -168,7 +172,7 @@ object TurnipReleases {
         val failed = ArrayList<String>()
         val f = json.optJSONArray("failed") ?: JSONArray()
         for (i in 0 until f.length()) failed.add(f.getString(i))
-        return Check(out, latest, failed, json.optLong("checkedAt"))
+        return Check(out, latest, failed, json.optLong("checkedAt"), rateLimited)
     }
 
     fun installedId(context: Context, asset: Asset, isInstalled: (String) -> Boolean): String? {

@@ -15,6 +15,11 @@ whose catalog is followed. Hiding that selected repository stops its checks;
 DroidDeck does not switch to another fork. The selected channel stays associated
 with the selected repository.
 
+GitHub rate limits produce a message asking you to try again after a few minutes.
+Cached releases stay available, and refresh requests wait for GitHub's retry or
+reset time before trying that host again. An Updates source must publish
+`catalog.json` on `main`; a missing repository or catalog gets a separate error.
+
 ## Release identification
 
 Existing component release conventions remain supported. New producers should
@@ -129,14 +134,15 @@ before building the app. Automatic first installation accepts only these exact
 pins and the declared numeric repository ID. Missing pins disable automatic
 download; they do not select an unpinned release or another repository.
 
-`-PcomponentRepository=owner/repository` sets the build's initial GPU producer.
+`-PcomponentRepository=owner/repository` selects the build's pinned GPU producer.
 PR builds set `DROIDDECK_COMPONENT_REPOSITORY` to the PR's head repository. Other
 CI builds use `GITHUB_REPOSITORY`; local builds use the GitHub `origin` push
 repository, or the official repository when no GitHub origin is available. The
-official repository remains a built-in row. A fork build initially seeds its
-producer as a removable source and hides the official row. This happens once;
-removing the fork source or changing visibility is preserved across restarts and
-upgrades. Bootstrap pins apply only when their repository matches that producer.
+official repository is the only initial source and stays visible, including in
+fork builds. Build provenance and bootstrap pins do not add a repository or
+change source visibility. Add another producer explicitly through Sources.
+Saved source choices are preserved across restarts and upgrades. Bootstrap pins
+apply only when their repository matches that producer and the source is enabled.
 Manual component selection remains available for configured compatible sources.
 
 Previously extracted complete System Vulkan runtimes are adopted as local legacy

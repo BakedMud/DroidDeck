@@ -179,10 +179,14 @@ object ProtonExtras {
             }
             if (due.isEmpty() || !force && (now - lastAttempt) in 0 until RETRY_MS) return false
             lastAttempt = now
+            var refreshError: Throwable? = null
             for ((sourceId, sourceTools) in due.groupBy { it.sourceId }) {
                 val source = visible.firstOrNull { it.id == sourceId } ?: continue
                 val releases = runCatching {
                     GitHubArtifacts.refreshReleases(context, SOURCE_SCOPE, sourceBuiltIns(), source)
+                }.onFailure {
+                    Log.w(TAG, "release check for ${source.repository}", it)
+                    if (refreshError == null || GitHubArtifacts.isRateLimited(it)) refreshError = it
                 }.getOrNull() ?: continue
                 val bound = RepositorySources.visible(context, SOURCE_SCOPE, sourceBuiltIns())
                     .firstOrNull { it.id == sourceId } ?: continue
@@ -190,6 +194,9 @@ object ProtonExtras {
                     val asset = runCatching {
                         if (tool.baseId == "manifest") pickManifest(context, bound, releases)
                         else pickAsset(tool, bound, releases)
+                    }.onFailure {
+                        Log.w(TAG, "release check for ${tool.id}", it)
+                        if (refreshError == null || GitHubArtifacts.isRateLimited(it)) refreshError = it
                     }.getOrNull() ?: continue
                     cache.put(tool.id, JSONObject().put("tag", asset.tag).put("at", now)
                         .put("sourceId", tool.sourceId).put("baseId", tool.baseId)
@@ -198,6 +205,7 @@ object ProtonExtras {
                 }
             }
             runCatching { file.writeText(cache.toString()) }
+            if (force) refreshError?.let { throw it }
             return true
         }
     }
@@ -247,7 +255,11 @@ object ProtonExtras {
     fun install(context: Context, tool: Tool, onProgress: (String, Int) -> Unit): String? {
         if (installInProgress) return context.getString(R.string.pextra_busy)
         installInProgress = true
-        return try { installNow(context, tool, onProgress) } finally { installInProgress = false }
+        return try { installNow(context, tool, onProgress) }
+        catch (error: Exception) {
+            Log.w(TAG, "install ${tool.id}", error)
+            GitHubArtifacts.failureMessage(context, error)
+        } finally { installInProgress = false }
     }
 
     private fun installNow(context: Context, tool: Tool, onProgress: (String, Int) -> Unit): String? {
@@ -389,6 +401,7 @@ object ProtonExtras {
             if (tool.baseId == "manifest") pickManifest(context, bound, releases) else pickAsset(tool, bound, releases)
         } catch (e: Exception) {
             Log.w(TAG, "release metadata for ${tool.id}", e)
+            if (GitHubArtifacts.isRateLimited(e)) throw e
             null
         }
     }

@@ -9,6 +9,7 @@ import java.net.URL
 import org.json.JSONArray
 import org.json.JSONObject
 import org.junit.After
+import org.junit.Before
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertTrue
@@ -26,18 +27,26 @@ class GitHubArtifactsTest {
     private val defaults = listOf("Example/Drivers")
     private val source get() = RepositorySources.list(app, key, defaults).single()
     private val productionConnection = GitHubArtifacts.openConnection
+    private val productionClock = GitHubArtifacts.currentTimeMillis
     private val sha = "a".repeat(64)
 
-    @After fun restoreTransport() { GitHubArtifacts.openConnection = productionConnection }
+    @Before fun clearRateLimits() { GitHubArtifacts.clearRateLimits() }
+    @After fun restoreTransport() {
+        GitHubArtifacts.openConnection = productionConnection
+        GitHubArtifacts.currentTimeMillis = productionClock
+        GitHubArtifacts.clearRateLimits()
+    }
 
     private class Response(url: URL, private val status: Int = 200, private val body: String = "",
-        private val location: String? = null) : HttpURLConnection(url) {
+        private val location: String? = null, private val headers: Map<String, String> = emptyMap()) : HttpURLConnection(url) {
         override fun connect() {}
         override fun disconnect() {}
         override fun usingProxy() = false
         override fun getResponseCode() = status
-        override fun getHeaderField(name: String?) = if (name == "Location") location else null
+        override fun getHeaderField(name: String?) = if (name == "Location") location
+            else headers.entries.firstOrNull { it.key.equals(name, ignoreCase = true) }?.value
         override fun getInputStream() = ByteArrayInputStream(body.toByteArray())
+        override fun getErrorStream() = ByteArrayInputStream(body.toByteArray())
         override fun getContentLengthLong() = -1L
     }
 
@@ -63,6 +72,72 @@ class GitHubArtifactsTest {
         GitHubArtifacts.openConnection = { throw IOException("offline") }
         assertTrue(runCatching { GitHubArtifacts.refreshReleases(app, key, defaults, source) }.isFailure)
         assertEquals(results, GitHubArtifacts.cachedReleases(app, key, defaults, source))
+    }
+
+    @Test fun primaryLimitHonorsResetAndAvoidsRequestsUntilTheReset() {
+        var now = 1_000_000L
+        var calls = 0
+        GitHubArtifacts.currentTimeMillis = { now }
+        GitHubArtifacts.openConnection = { url ->
+            calls++
+            if (calls == 1) Response(url, 403, headers = mapOf("X-RateLimit-Remaining" to "0", "X-RateLimit-Reset" to "1600"))
+            else Response(url, body = "ok")
+        }
+        val url = "https://api.github.com/repos/example/drivers"
+        val first = runCatching { GitHubArtifacts.fetch(url, 128) { true } }.exceptionOrNull()
+        assertTrue(first is GitHubArtifacts.RateLimitException)
+        assertEquals(1_600_000L, (first as GitHubArtifacts.RateLimitException).retryAtMillis)
+        assertTrue(GitHubArtifacts.isRateLimited(IOException("wrapped", first)))
+        now = 1_599_999L
+        assertTrue(runCatching { GitHubArtifacts.fetch(url, 128) { true } }.exceptionOrNull() is GitHubArtifacts.RateLimitException)
+        assertEquals(1, calls)
+        now = 1_600_000L
+        assertEquals("ok", GitHubArtifacts.fetch(url, 128) { true }.toString(Charsets.UTF_8))
+        assertEquals(2, calls)
+    }
+
+    @Test fun secondaryLimitWithRemainingQuotaHonorsRetryAfter() {
+        GitHubArtifacts.currentTimeMillis = { 1_000_000L }
+        GitHubArtifacts.openConnection = { url -> Response(url, 403,
+            body = """{"message":"You have exceeded a secondary rate limit."}""",
+            headers = mapOf("X-RateLimit-Remaining" to "15", "Retry-After" to "120", "X-RateLimit-Reset" to "9999")) }
+        val error = runCatching { GitHubArtifacts.fetch("https://api.github.com/repos/example/drivers", 128) { true } }.exceptionOrNull()
+        assertTrue(error is GitHubArtifacts.RateLimitException)
+        assertEquals(1_120_000L, (error as GitHubArtifacts.RateLimitException).retryAtMillis)
+    }
+
+    @Test fun headerlessSecondaryLimitAnd429UseBriefCooldown() {
+        GitHubArtifacts.currentTimeMillis = { 1_000_000L }
+        for ((status, body) in listOf(403 to """{"message":"API rate limit exceeded"}""", 429 to "not JSON")) {
+            GitHubArtifacts.clearRateLimits()
+            GitHubArtifacts.openConnection = { url -> Response(url, status, body) }
+            val error = runCatching { GitHubArtifacts.fetch("https://api.github.com/repos/example/drivers", 128) { true } }.exceptionOrNull()
+            assertTrue(error is GitHubArtifacts.RateLimitException)
+            assertEquals(1_180_000L, (error as GitHubArtifacts.RateLimitException).retryAtMillis)
+        }
+    }
+
+    @Test fun normalForbiddenAndMissingResponsesAreNotRateLimits() {
+        for (status in listOf(403, 404, 500)) {
+            GitHubArtifacts.openConnection = { url -> Response(url, status,
+                body = """{"message":"Resource not accessible by integration"}""", headers = mapOf("X-RateLimit-Remaining" to "42")) }
+            val error = runCatching { GitHubArtifacts.fetch("https://api.github.com/repos/example/drivers", 128) { true } }.exceptionOrNull()!!
+            assertFalse(GitHubArtifacts.isRateLimited(error))
+            assertEquals(status, (error as GitHubArtifacts.HttpException).status)
+        }
+    }
+
+    @Test fun throttledRefreshPreservesLastGoodCatalogAndDoesNotBlockReleaseAssets() {
+        successfulTransport()
+        val cached = GitHubArtifacts.refreshReleases(app, key, defaults, source)
+        GitHubArtifacts.openConnection = { url ->
+            if (url.host == "api.github.com") Response(url, 429)
+            else Response(url, body = "asset")
+        }
+        val error = runCatching { GitHubArtifacts.refreshReleases(app, key, defaults, source) }.exceptionOrNull()!!
+        assertTrue(GitHubArtifacts.isRateLimited(error))
+        assertEquals(cached, GitHubArtifacts.cachedReleases(app, key, defaults, source))
+        assertEquals("asset", GitHubArtifacts.fetch("https://github.com/example/drivers/releases/download/v1/bundle.zip", 128) { true }.toString(Charsets.UTF_8))
     }
 
     @Test fun hiddenSourceHasNoCachedResultsAndMakesNoHttpRequests() {

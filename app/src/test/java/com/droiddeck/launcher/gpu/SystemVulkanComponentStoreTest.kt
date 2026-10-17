@@ -1,8 +1,8 @@
 package com.droiddeck.launcher.gpu
 
 import com.droiddeck.launcher.core.FileUtils
+import com.droiddeck.launcher.artifact.GitHubArtifacts
 import com.droiddeck.launcher.artifact.RepositorySources
-import com.droiddeck.launcher.BuildConfig
 import org.json.JSONArray
 import org.json.JSONObject
 import org.junit.After
@@ -28,6 +28,45 @@ class SystemVulkanComponentStoreTest {
         FileUtils.delete(File(app.filesDir, "system_vulkan"))
         FileUtils.delete(File(app.filesDir, "repository-sources"))
         FileUtils.delete(File(app.cacheDir, "repository-metadata"))
+    }
+
+    @Test fun initialSourcesKeepOnlyTheVisibleOfficialRepository() {
+        val rows = SystemVulkanComponentStore.initializeSources(app, profile)
+        assertEquals(listOf("droid-deck/droiddeck"), rows.map { it.repository })
+        assertTrue(rows.single().builtIn)
+        assertFalse(rows.single().hidden)
+    }
+
+    @Test fun initializationPreservesExplicitSourcesAndVisibility() {
+        val rows = SystemVulkanComponentStore.initializeSources(app, profile)
+        val chosen = rows.map { it.copy(hidden = true) } + RepositorySources.source("Example/CustomDrivers")
+        RepositorySources.save(app, SystemVulkanComponentStore.scope(profile), SystemVulkanComponentStore.sourceBuiltIns(), chosen)
+        assertEquals(chosen, SystemVulkanComponentStore.initializeSources(app, profile))
+    }
+
+    @Test fun rateLimitedRefreshRetainsTheLastSuccessfulCheckTime() {
+        val defaults = SystemVulkanComponentStore.sourceBuiltIns()
+        val scope = SystemVulkanComponentStore.scope(profile)
+        val row = SystemVulkanComponentStore.initializeSources(app, profile).single()
+        val source = RepositorySources.bind(app, scope, defaults, row, 12345L,
+            RepositorySources.generation(app, scope, defaults))
+        val cache = File(RepositorySources.cacheDirectory(app, scope, source), "system-vulkan-candidates.json")
+        cache.parentFile!!.mkdirs()
+        cache.writeText(JSONObject().put("schema", 1).put("sourceId", source.id)
+            .put("repository", source.repository).put("repositoryId", source.repositoryId)
+            .put("candidates", JSONArray()).toString())
+        assertTrue(cache.setLastModified(123_000L))
+        val before = SystemVulkanComponentStore.cached(app, profile).checkedAt
+        val transport = GitHubArtifacts.openConnection
+        try {
+            GitHubArtifacts.openConnection = { throw GitHubArtifacts.RateLimitException(System.currentTimeMillis() + 180_000L) }
+            val result = SystemVulkanComponentStore.refresh(app, profile)
+            assertTrue(result.rateLimited)
+            assertEquals(listOf(source.repository), result.failed)
+            assertEquals(before, result.checkedAt)
+        } finally {
+            GitHubArtifacts.openConnection = transport
+        }
     }
 
     @Test fun activationWaitsForGuestsAndThenPromotesPendingBundle() {
@@ -121,11 +160,11 @@ class SystemVulkanComponentStoreTest {
 
     @Test fun hiddenSourceDropsAvailableRowsButKeepsInstalledBundle() {
         val rows = SystemVulkanComponentStore.initializeSources(app, profile)
-        val configured = rows.first { it.repository == RepositorySources.canonicalRepository(BuildConfig.COMPONENT_REPOSITORY) }
+        val configured = rows.single()
         val generation = RepositorySources.generation(app, SystemVulkanComponentStore.scope(profile), SystemVulkanComponentStore.sourceBuiltIns())
         RepositorySources.bind(
             app, SystemVulkanComponentStore.scope(profile), SystemVulkanComponentStore.sourceBuiltIns(), configured,
-            BuildConfig.COMPONENT_REPOSITORY_ID.takeIf { it > 0 } ?: 1406436811L, generation,
+            12345L, generation,
         )
         val source = RepositorySources.list(
             app, SystemVulkanComponentStore.scope(profile), SystemVulkanComponentStore.sourceBuiltIns(),

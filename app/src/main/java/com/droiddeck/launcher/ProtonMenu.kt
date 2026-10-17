@@ -8,6 +8,7 @@ import androidx.compose.runtime.setValue
 import com.droiddeck.launcher.session.ProtonExtras
 import com.droiddeck.launcher.ui.ProtonRow
 import com.droiddeck.launcher.session.SessionState
+import com.droiddeck.launcher.artifact.GitHubArtifacts
 
 internal class ProtonMenu(private val activity: android.app.Activity, private val ui: android.os.Handler) {
     var protonRows by mutableStateOf<List<ProtonRow>>(emptyList())
@@ -68,8 +69,15 @@ internal class ProtonMenu(private val activity: android.app.Activity, private va
         val id = checkRequest.incrementAndGet()
         inFlightChecks.incrementAndGet()
         Thread({
-            val asked = try { ProtonExtras.checkLatest(activity, force) } catch (_: Throwable) { false } finally { inFlightChecks.decrementAndGet() }
-            if (asked) ui.post { if (id == checkRequest.get()) refreshProtons() }
+            val result = try { runCatching { ProtonExtras.checkLatest(activity, force) } }
+                finally { inFlightChecks.decrementAndGet() }
+            ui.post {
+                if (id != checkRequest.get()) return@post
+                if (result.getOrDefault(false) || result.isFailure) refreshProtons()
+                if (force) result.exceptionOrNull()?.let {
+                    android.widget.Toast.makeText(activity, GitHubArtifacts.failureMessage(activity, it), android.widget.Toast.LENGTH_LONG).show()
+                }
+            }
         }, "proton-updates").start()
     }
 

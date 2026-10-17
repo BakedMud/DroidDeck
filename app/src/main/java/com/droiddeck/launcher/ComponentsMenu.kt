@@ -7,6 +7,7 @@ import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.setValue
 import com.droiddeck.launcher.session.ComponentsManager
 import com.droiddeck.launcher.session.ProtonDefault
+import com.droiddeck.launcher.artifact.GitHubArtifacts
 
 internal var componentsCatalogReader: (android.content.Context, Boolean) -> ComponentsManager.Catalog =
     ComponentsManager::catalog
@@ -82,13 +83,16 @@ internal class ComponentsMenu(private val activity: android.app.Activity, privat
         val id = ++catalogRequest
         compChecking = true
         Thread({
-            val cat = runCatching { componentsCatalogReader(activity, force) }.getOrNull()
+            val result = runCatching { componentsCatalogReader(activity, force) }
+            val cat = result.getOrNull()
             ui.post {
                 if (id != catalogRequest) return@post
                 compChecking = false
                 if (cat != null) { compCatalog = cat.items; compCatalogAt = cat.fetchedAt }
                 if (force && (cat == null || cat.failed.isNotEmpty())) {
-                    android.widget.Toast.makeText(activity, activity.getString(R.string.comp_nightlies_unreachable), android.widget.Toast.LENGTH_LONG).show()
+                    val rateLimited = cat?.rateLimited == true || result.exceptionOrNull()?.let(GitHubArtifacts::isRateLimited) == true
+                    val message = activity.getString(if (rateLimited) R.string.sources_github_rate_limited else R.string.comp_nightlies_unreachable)
+                    android.widget.Toast.makeText(activity, message, android.widget.Toast.LENGTH_LONG).show()
                 }
             }
         }, "components-catalog").start()

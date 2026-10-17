@@ -3,6 +3,7 @@ package com.droiddeck.launcher.artifact
 import android.content.Context
 import android.util.AtomicFile
 import android.util.Base64
+import com.droiddeck.launcher.R
 import org.json.JSONArray
 import org.json.JSONObject
 import java.io.File
@@ -20,6 +21,25 @@ object GitHubArtifacts {
     private const val MAX_JSON_BYTES = 2 * 1024 * 1024
     private const val MAX_CACHE_BYTES = 12 * 1024 * 1024
     private const val MAX_REDIRECTS = 3
+    private const val DEFAULT_RETRY_MS = 3 * 60_000L
+
+    class RateLimitException(val retryAtMillis: Long) : IOException(
+        "GitHub is rate limiting source refreshes. Try again after a few minutes.",
+    )
+
+    class HttpException(val status: Int) : IOException("GitHub metadata returned HTTP $status")
+
+    private val retryAtByHost = HashMap<String, Long>()
+    internal var currentTimeMillis: () -> Long = System::currentTimeMillis
+
+    internal fun clearRateLimits() = synchronized(retryAtByHost) { retryAtByHost.clear() }
+
+    @JvmStatic fun isRateLimited(error: Throwable): Boolean =
+        generateSequence(error) { it.cause }.take(16).any { it is RateLimitException }
+
+    @JvmStatic fun failureMessage(context: Context, error: Throwable): String =
+        if (isRateLimited(error)) context.getString(R.string.sources_github_rate_limited)
+        else error.message ?: error.javaClass.simpleName
 
     data class Asset(val id: Long, val name: String, val url: String, val size: Long, val sha256: String)
     data class Release(
@@ -352,6 +372,13 @@ object GitHubArtifacts {
         var current = URI(url)
         for (hop in 0..MAX_REDIRECTS) {
             if (!validHttps(current) || !allowed(current)) throw IOException("Untrusted metadata URL")
+            val host = current.host.lowercase(Locale.ROOT)
+            synchronized(retryAtByHost) {
+                retryAtByHost[host]?.let { retryAt ->
+                    if (currentTimeMillis() < retryAt) throw RateLimitException(retryAt)
+                    retryAtByHost.remove(host)
+                }
+            }
             val connection = openConnection(current.toURL())
             try {
                 connection.instanceFollowRedirects = false
@@ -370,13 +397,41 @@ object GitHubArtifacts {
                     current = current.resolve(location)
                     continue
                 }
-                if (status != 200) throw IOException("GitHub metadata returned HTTP $status")
+                if (status != 200) {
+                    rateLimit(connection, status)?.let { error ->
+                        synchronized(retryAtByHost) {
+                            retryAtByHost[host] = maxOf(retryAtByHost[host] ?: 0L, error.retryAtMillis)
+                        }
+                        throw error
+                    }
+                    throw HttpException(status)
+                }
                 return receive(connection)
             } finally {
                 connection.disconnect()
             }
         }
         throw IOException("Too many metadata redirects")
+    }
+
+    private fun rateLimit(connection: HttpURLConnection, status: Int): RateLimitException? {
+        if (status != 403 && status != 429) return null
+        val remaining = connection.getHeaderField("X-RateLimit-Remaining")?.trim()?.toLongOrNull()
+        val retryAfter = connection.getHeaderField("Retry-After")?.trim()?.toLongOrNull()?.takeIf { it >= 0 }
+        val message = runCatching {
+            connection.errorStream?.use { input ->
+                JSONObject(RepositorySources.readBounded(input, 16 * 1024).toString(Charsets.UTF_8))
+                    .optString("message").lowercase(Locale.ROOT)
+            }.orEmpty()
+        }.getOrDefault("")
+        if (status != 429 && remaining != 0L && retryAfter == null &&
+            "rate limit" !in message && "abuse detection" !in message) return null
+        val now = currentTimeMillis()
+        val reset = if (remaining == 0L) connection.getHeaderField("X-RateLimit-Reset")?.trim()
+            ?.toLongOrNull()?.takeIf { it in 1..Long.MAX_VALUE / 1000 }?.times(1000) else null
+        val retryAt = retryAfter?.takeIf { it <= (Long.MAX_VALUE - now) / 1000 }?.let { now + it * 1000 }
+        val advertised = listOfNotNull(reset, retryAt).maxOrNull()
+        return RateLimitException(advertised?.takeIf { it > now } ?: now + DEFAULT_RETRY_MS)
     }
 
     private val ASSET_HOSTS = setOf("release-assets.githubusercontent.com", "objects.githubusercontent.com")

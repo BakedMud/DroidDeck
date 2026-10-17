@@ -2,6 +2,7 @@ package com.droiddeck.launcher.session
 
 import com.droiddeck.launcher.runtime.LinuxRuntime
 import com.droiddeck.launcher.artifact.RepositorySources
+import com.droiddeck.launcher.artifact.GitHubArtifacts
 import org.json.JSONArray
 import org.json.JSONObject
 import org.junit.Assert.assertEquals
@@ -16,6 +17,7 @@ import org.robolectric.RobolectricTestRunner
 import org.robolectric.RuntimeEnvironment
 import org.robolectric.annotation.Config
 import java.io.File
+import java.net.HttpURLConnection
 
 @RunWith(RobolectricTestRunner::class)
 @Config(sdk = [28], manifest = Config.NONE)
@@ -171,6 +173,36 @@ class ProtonExtrasTest {
         File(context.filesDir, "proton-extras.json").writeText(JSONObject().put("DroidDeck-Proton 11-7.5", "DroidDeck-Proton-11-7.6").toString())
         assertEquals(listOf("DroidDeck-Proton-11-7.6"), ProtonExtras.installedTags(context, tool("droiddeck")))
         assertNull(ProtonExtras.update(context, tool("droiddeck")))
+    }
+
+    @Test
+    fun forcedRefreshReportsRateLimitAndKeepsLastGoodVersions() {
+        val context = RuntimeEnvironment.getApplication()
+        val latest = File(context.filesDir, "proton-latest.json")
+        val cache = JSONObject().put("ge", JSONObject().put("tag", "GE-Proton11-7").put("at", 123L)).toString()
+        latest.writeText(cache)
+        val production = GitHubArtifacts.openConnection
+        var calls = 0
+        try {
+            GitHubArtifacts.clearRateLimits()
+            GitHubArtifacts.openConnection = { url ->
+                calls++
+                object : HttpURLConnection(url) {
+                    override fun connect() {}
+                    override fun disconnect() {}
+                    override fun usingProxy() = false
+                    override fun getResponseCode() = 429
+                }
+            }
+            val error = runCatching { ProtonExtras.checkLatest(context, force = true) }.exceptionOrNull()!!
+            assertTrue(GitHubArtifacts.isRateLimited(error))
+            assertEquals(1, calls)
+            assertEquals(cache, latest.readText())
+            assertEquals("GE-Proton11-7", ProtonExtras.cachedLatest(context, tool("ge")))
+        } finally {
+            GitHubArtifacts.openConnection = production
+            GitHubArtifacts.clearRateLimits()
+        }
     }
 
     @Test

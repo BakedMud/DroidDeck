@@ -23,6 +23,7 @@ import com.droiddeck.launcher.gpu.SystemVulkanComponentStore
 import com.droiddeck.launcher.gpu.TurnipDriver
 import com.droiddeck.launcher.gpu.TurnipReleases
 import com.droiddeck.launcher.artifact.RepositorySources
+import com.droiddeck.launcher.artifact.GitHubArtifacts
 import com.droiddeck.launcher.session.SessionService
 import com.droiddeck.launcher.session.SessionPrefs
 import com.droiddeck.launcher.session.QuestExperimental
@@ -335,12 +336,16 @@ internal class DriverMenus(private val activity: Activity, private val ui: Handl
         releaseChecking = true
         autoStatus = activity.getString(R.string.drivers_checking_latest)
         Thread({
-            val problem = if (force || releasesStale()) runCatching { TurnipReleases.refresh(activity) }.exceptionOrNull()?.message else null
+            val result = if (force || releasesStale()) runCatching { TurnipReleases.refresh(activity) } else null
+            val rateLimited = result?.getOrNull()?.rateLimited == true || result?.exceptionOrNull()?.let(GitHubArtifacts::isRateLimited) == true
+            val problem = if (rateLimited) activity.getString(R.string.sources_github_rate_limited)
+                else result?.exceptionOrNull()?.let { GitHubArtifacts.failureMessage(activity, it) }
             val holdBack = !force && com.droiddeck.launcher.frontend.AutoComponents.constrained(activity)
             ui.post {
                 releaseChecking = false
                 refreshReleaseRows()
                 refreshPairs()
+                if (force && rateLimited) android.widget.Toast.makeText(activity, problem, android.widget.Toast.LENGTH_LONG).show()
                 val pairs = DriverPairs.from(TurnipReleases.cached(activity))
                 val key = DriverPairs.recommendedKey(gpu, pairs)
                 val pair = pairs.firstOrNull { it.key == key }
@@ -633,14 +638,17 @@ internal class DriverMenus(private val activity: Activity, private val ui: Handl
         releaseChecking = true
         releaseStatus = activity.getString(R.string.drivers_checking_sources)
         Thread({
-            val problem = try { TurnipReleases.refresh(activity); null } catch (e: Exception) {
-                Log.w(TAG, "latest Turnip check", e); e.message ?: activity.getString(R.string.drivers_check_failed)
-            }
+            val result = runCatching { TurnipReleases.refresh(activity) }
+            result.exceptionOrNull()?.let { Log.w(TAG, "latest Turnip check", it) }
+            val rateLimited = result.getOrNull()?.rateLimited == true || result.exceptionOrNull()?.let(GitHubArtifacts::isRateLimited) == true
+            val problem = if (rateLimited) activity.getString(R.string.sources_github_rate_limited)
+                else result.exceptionOrNull()?.let { GitHubArtifacts.failureMessage(activity, it) }
             ui.post {
                 releaseChecking = false
                 refreshReleaseRows()
                 refreshPairs()
                 if (problem != null) releaseStatus = activity.getString(R.string.upd_couldnt_check, problem)
+                if (rateLimited) android.widget.Toast.makeText(activity, problem, android.widget.Toast.LENGTH_LONG).show()
             }
         }, "turnip-release-check").start()
     }
@@ -684,6 +692,9 @@ internal class DriverMenus(private val activity: Activity, private val ui: Handl
         releaseStatus = activity.getString(R.string.drivers_checking_sources)
         Thread({
             val result = runCatching { SystemVulkanComponentStore.refresh(activity, profile) }
+            val rateLimited = result.getOrNull()?.rateLimited == true || result.exceptionOrNull()?.let(GitHubArtifacts::isRateLimited) == true
+            val problem = if (rateLimited) activity.getString(R.string.sources_github_rate_limited)
+                else result.exceptionOrNull()?.let { GitHubArtifacts.failureMessage(activity, it) }
             ui.post {
                 releaseChecking = false
                 result.onSuccess { refreshed ->
@@ -696,9 +707,10 @@ internal class DriverMenus(private val activity: Activity, private val ui: Handl
                     })
                 }.onFailure { error ->
                     Log.w(TAG, "latest System Vulkan check", error)
-                    releaseStatus = activity.getString(R.string.upd_couldnt_check, error.message.orEmpty())
                 }
                 refreshDrivers()
+                if (problem != null) releaseStatus = activity.getString(R.string.upd_couldnt_check, problem)
+                if (rateLimited) android.widget.Toast.makeText(activity, problem, android.widget.Toast.LENGTH_LONG).show()
             }
         }, "system-vulkan-check").start()
     }

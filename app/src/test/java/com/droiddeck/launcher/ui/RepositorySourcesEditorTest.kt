@@ -1,6 +1,18 @@
 package com.droiddeck.launcher.ui
 
 import android.app.Application
+import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.foundation.layout.padding
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.setValue
+import androidx.compose.ui.Alignment
+import androidx.compose.ui.Modifier
+import androidx.compose.ui.geometry.Offset
+import androidx.compose.ui.test.assertCountEquals
+import androidx.compose.ui.test.isPopup
+import androidx.compose.ui.unit.dp
 import androidx.compose.ui.test.assertIsEnabled
 import androidx.compose.ui.test.assertIsNotEnabled
 import androidx.compose.ui.test.onAllNodesWithContentDescription
@@ -15,6 +27,9 @@ import kotlinx.coroutines.Dispatchers
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertTrue
+import org.junit.Assert.assertNull
+import org.junit.After
+import org.junit.Before
 import org.junit.Rule
 import org.junit.Test
 import org.junit.runner.RunWith
@@ -32,6 +47,27 @@ class RepositorySourcesEditorTest {
     private val builtIns = listOf("Droid-Deck/DroidDeck")
     private val repository = "droid-deck/droiddeck"
 
+    @Before fun resetMenu() { Steps.drop() }
+    @After fun closeMenu() { Steps.drop() }
+
+    private fun show(
+        scope: String,
+        dispatcher: CoroutineDispatcher = Dispatchers.Unconfined,
+        visible: () -> Boolean = { true },
+        onSaved: () -> Unit = {},
+    ) {
+        compose.setContent {
+            DroidDeckTheme {
+                Box(Modifier.fillMaxSize()) {
+                    if (visible()) Box(Modifier.align(Alignment.TopEnd).padding(16.dp)) {
+                        RepositorySourcesButton(scope, builtIns, ioDispatcher = dispatcher, onSaved = onSaved)
+                    }
+                    StepsLayer(Offset.Zero)
+                }
+            }
+        }
+    }
+
     private class QueuedDispatcher : CoroutineDispatcher() {
         private val pending = ArrayDeque<Runnable>()
         override fun dispatch(context: CoroutineContext, block: Runnable) { pending.addLast(block) }
@@ -46,13 +82,50 @@ class RepositorySourcesEditorTest {
         }
     }
 
+    @Test fun openingUsesTheSameContinuousOutlineAsTheDeviceChip() {
+        show("editor/connected")
+        val button = compose.onNodeWithContentDescription(context.getString(R.string.sources_component_title))
+        val bounds = button.fetchSemanticsNode().boundsInRoot
+        open()
+        compose.runOnIdle {
+            val menu = requireNotNull(Steps.step)
+            assertEquals(bounds, menu.anchor)
+            assertEquals(StepSide.Left, menu.side)
+            assertEquals(12.dp, menu.pillCorner)
+            assertTrue(Steps.open)
+        }
+        compose.onAllNodes(isPopup()).assertCountEquals(0)
+    }
+
+    @Test fun leavingThePageRemovesItsSourceMenu() {
+        var visible by mutableStateOf(true)
+        show("editor/leave", visible = { visible })
+        open()
+        compose.runOnIdle { visible = false }
+        compose.runOnIdle { assertNull(Steps.step) }
+        compose.onNodeWithText(context.getString(R.string.sources_save)).assertDoesNotExist()
+    }
+
+    @Test fun dismissIsBlockedUntilTheSaveFinishes() {
+        val dispatcher = QueuedDispatcher()
+        var saves = 0
+        show("editor/saving", dispatcher, onSaved = { saves++ })
+        compose.onNodeWithContentDescription(context.getString(R.string.sources_component_title)).performClick()
+        compose.runOnIdle { dispatcher.runPending() }
+        compose.onNodeWithText(context.getString(R.string.sources_save)).performClick()
+        compose.runOnIdle {
+            Steps.fold()
+            assertTrue(Steps.open)
+        }
+        compose.onNodeWithText(context.getString(R.string.sources_saving)).assertIsNotEnabled()
+        compose.runOnIdle { dispatcher.runPending() }
+        compose.waitUntil(5_000) { saves == 1 }
+        compose.runOnIdle { assertNull(Steps.step) }
+    }
+
     @Test fun editingWaitsForTheSourceReadToComplete() {
         val dispatcher = QueuedDispatcher()
-        compose.setContent {
-            DroidDeckTheme {
-                RepositorySourcesButton("editor/loading", builtIns, ioDispatcher = dispatcher, onSaved = {})
-            }
-        }
+        show("editor/loading", dispatcher)
         compose.onNodeWithContentDescription(context.getString(R.string.sources_component_title)).performClick()
         compose.onNodeWithText(context.getString(R.string.sources_add)).assertIsNotEnabled()
         compose.onNodeWithText(context.getString(R.string.sources_save)).assertIsNotEnabled()
@@ -65,9 +138,7 @@ class RepositorySourcesEditorTest {
     @Test fun hidingIsDraftUntilSaveAndBuiltInCannotBeRemoved() {
         val scope = "editor/hide"
         var saves = 0
-        compose.setContent {
-            DroidDeckTheme { RepositorySourcesButton(scope, builtIns, ioDispatcher = Dispatchers.Unconfined, onSaved = { saves++ }) }
-        }
+        show(scope, onSaved = { saves++ })
         open()
         compose.onNodeWithContentDescription(context.getString(R.string.sources_remove, repository)).assertDoesNotExist()
         compose.onNodeWithContentDescription(context.getString(R.string.sources_hide, repository)).performClick()
@@ -80,7 +151,7 @@ class RepositorySourcesEditorTest {
 
     @Test fun closingDiscardsDraft() {
         val scope = "editor/discard"
-        compose.setContent { DroidDeckTheme { RepositorySourcesButton(scope, builtIns, ioDispatcher = Dispatchers.Unconfined, onSaved = {}) } }
+        show(scope)
         open()
         compose.onNodeWithContentDescription(context.getString(R.string.sources_hide, repository)).performClick()
         compose.onNodeWithContentDescription(context.getString(R.string.sources_component_title)).performClick()
@@ -93,7 +164,7 @@ class RepositorySourcesEditorTest {
     @Test fun addValidatesRepositoryBeforeSaveAndCustomRowCanBeRemoved() {
         val scope = "editor/add"
         var saves = 0
-        compose.setContent { DroidDeckTheme { RepositorySourcesButton(scope, builtIns, ioDispatcher = Dispatchers.Unconfined, onSaved = { saves++ }) } }
+        show(scope, onSaved = { saves++ })
         open()
         compose.onNodeWithText(context.getString(R.string.sources_add)).performClick()
         val input = compose.onNodeWithText(context.getString(R.string.sources_repository))

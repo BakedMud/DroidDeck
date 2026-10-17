@@ -8,6 +8,7 @@ import android.content.IntentFilter
 import android.content.pm.PackageInstaller
 import android.os.Build
 import android.os.Handler
+import android.util.Log
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
@@ -18,6 +19,7 @@ import com.droiddeck.launcher.ui.UpdatesState
 import com.droiddeck.launcher.update.AppUpdates
 import com.droiddeck.launcher.update.SelfInstaller
 import com.droiddeck.launcher.artifact.RepositorySources
+import com.droiddeck.launcher.artifact.GitHubArtifacts
 import com.droiddeck.launcher.core.FileUtils
 
 internal class UpdatesMenu(private val activity: Activity, private val ui: Handler) {
@@ -31,6 +33,7 @@ internal class UpdatesMenu(private val activity: Activity, private val ui: Handl
     var sources by mutableStateOf<List<RepositorySources.Source>>(emptyList())
     private var pending: AppUpdates.Release? = null
     private var lastCheck = 0L
+    private var lastRateLimitPopup = 0L
     private var request = 0
 
     fun state() = UpdatesState(catalog, follow, checking, error, stage, percent, askPermission, sources, follow.sourceId.ifEmpty { null })
@@ -77,7 +80,20 @@ internal class UpdatesMenu(private val activity: Activity, private val ui: Handl
                         if (selected.sourceId.isEmpty()) selected.copy(sourceId = selectedSource) else selected
                     }
                     error = null
-                }.onFailure { if (force) error = activity.getString(R.string.upd_couldnt_check, it.message ?: it.javaClass.simpleName) }
+                }.onFailure {
+                    Log.w("UpdatesMenu", "update source refresh", it)
+                    val rateLimited = GitHubArtifacts.isRateLimited(it)
+                    if (force || rateLimited) {
+                        error = GitHubArtifacts.failureMessage(activity, it).let { message ->
+                            if (rateLimited) message else activity.getString(R.string.upd_couldnt_check, message)
+                        }
+                        val popupAt = System.currentTimeMillis()
+                        if (rateLimited && (force || popupAt - lastRateLimitPopup >= 3 * 60_000)) {
+                            lastRateLimitPopup = popupAt
+                            android.widget.Toast.makeText(activity, error, android.widget.Toast.LENGTH_LONG).show()
+                        }
+                    }
+                }
             }
         }, "app-updates").start()
     }
@@ -100,6 +116,8 @@ internal class UpdatesMenu(private val activity: Activity, private val ui: Handl
             askPermission = false
         } else {
             catalog = AppUpdates.cached(activity, follow.sourceId)
+            error = null
+            check(force = true)
         }
     }
 

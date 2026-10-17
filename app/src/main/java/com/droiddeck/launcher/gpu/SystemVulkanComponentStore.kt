@@ -58,6 +58,7 @@ object SystemVulkanComponentStore {
         val candidates: List<Candidate>,
         val failed: List<String>,
         val checkedAt: Long,
+        val rateLimited: Boolean = false,
     )
 
     data class Installed(
@@ -98,13 +99,7 @@ object SystemVulkanComponentStore {
 
     @JvmStatic fun initializeSources(context: Context, profile: SystemVulkanDriver.Profile): List<RepositorySources.Source> {
         val defaults = sourceBuiltIns()
-        val official = RepositorySources.source(defaults.single())
-        val producer = RepositorySources.source(BuildConfig.COMPONENT_REPOSITORY)
-        val rows = if (producer.id == official.id) {
-            listOf(official.copy(builtIn = true))
-        } else {
-            listOf(official.copy(builtIn = true, hidden = true), producer)
-        }
+        val rows = defaults.map { RepositorySources.source(it).copy(builtIn = true) }
         return RepositorySources.initialize(context, scope(profile), defaults, rows)
     }
 
@@ -123,7 +118,7 @@ object SystemVulkanComponentStore {
         val defaults = sourceBuiltIns()
         val configured = RepositorySources.visible(context, scope, defaults).singleOrNull {
             it.repository == repository
-        } ?: throw IOException("The pinned System Vulkan producer is hidden")
+        } ?: throw IOException("Add a source with a compatible ${profile.gpuName} bundle in Components > Sources")
         val release = GitHubArtifacts.release(context, scope, defaults, configured, tag)
         val source = RepositorySources.visible(context, scope, defaults).single { it.id == configured.id }
         require(source.repositoryId == BuildConfig.COMPONENT_REPOSITORY_ID) { "System Vulkan producer repository identity changed" }
@@ -148,6 +143,7 @@ object SystemVulkanComponentStore {
         val generation = RepositorySources.generation(context, scope, defaults)
         val candidates = ArrayList<Candidate>()
         val failed = ArrayList<String>()
+        var rateLimited = false
         for (initial in RepositorySources.visible(context, scope, defaults)) {
             try {
                 val releases = GitHubArtifacts.refreshReleases(context, scope, defaults, initial)
@@ -164,13 +160,14 @@ object SystemVulkanComponentStore {
                 if (RepositorySources.generation(context, scope, defaults) == generation &&
                     RepositorySources.isCurrent(context, scope, defaults, initial.id, generation)) {
                     failed.add(initial.repository)
+                    rateLimited = rateLimited || GitHubArtifacts.isRateLimited(error)
                     candidates.addAll(readCandidates(context, scope, initial, profile))
                 }
             }
         }
         if (RepositorySources.generation(context, scope, defaults) != generation) return cached(context, profile)
         val visible = RepositorySources.visible(context, scope, defaults).mapTo(HashSet()) { it.id }
-        return Catalog(deduplicate(candidates.filter { it.sourceId in visible }), failed, System.currentTimeMillis())
+        return Catalog(deduplicate(candidates.filter { it.sourceId in visible }), failed, cached(context, profile).checkedAt, rateLimited)
     }
 
     @JvmStatic fun cached(context: Context, profile: SystemVulkanDriver.Profile): Catalog {
