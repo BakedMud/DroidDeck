@@ -1,11 +1,26 @@
 package com.droiddeck.launcher.ui
 
 import android.app.Application
+import android.os.SystemClock
+import android.view.InputDevice
+import android.view.KeyEvent
+import android.view.View
+import androidx.compose.runtime.SideEffect
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.setValue
+import androidx.compose.ui.focus.FocusRequester
+import androidx.compose.ui.input.InputMode
+import androidx.compose.ui.input.InputModeManager
+import androidx.compose.ui.platform.LocalInputModeManager
+import androidx.compose.ui.platform.LocalView
 import androidx.compose.ui.semantics.Role
+import androidx.compose.ui.semantics.SemanticsActions
 import androidx.compose.ui.semantics.SemanticsProperties
 import androidx.compose.ui.test.SemanticsMatcher
 import androidx.compose.ui.test.assertCountEquals
 import androidx.compose.ui.test.assertIsEnabled
+import androidx.compose.ui.test.assertIsFocused
 import androidx.compose.ui.test.assertIsNotEnabled
 import androidx.compose.ui.test.hasText
 import androidx.compose.ui.test.onAllNodesWithText
@@ -13,6 +28,7 @@ import androidx.compose.ui.test.onLast
 import androidx.compose.ui.test.onNodeWithText
 import androidx.compose.ui.test.performClick
 import androidx.compose.ui.test.performScrollTo
+import androidx.compose.ui.test.performSemanticsAction
 import com.droiddeck.launcher.R
 import com.droiddeck.launcher.frontend.Library
 import com.droiddeck.launcher.session.ComponentsManager
@@ -30,6 +46,105 @@ import org.robolectric.annotation.Config
 @Config(sdk = [28], application = Application::class)
 class ComponentsPageProfileTest {
     @get:Rule val compose = createRobolectricComposeRule()
+
+    @OptIn(androidx.compose.ui.ExperimentalComposeUiApi::class)
+    @Test fun gamepadAActivatesGpuModesAndPairsOnceAndRespectsBusyRows() {
+        val context = RuntimeEnvironment.getApplication()
+        val modes = mutableListOf<String>()
+        val pairs = mutableListOf<String>()
+        var mode by mutableStateOf(GPU_MODE_MIX)
+        var busy by mutableStateOf<String?>(null)
+        lateinit var gpuView: View
+        lateinit var inputModeManager: InputModeManager
+        val first = FocusRequester()
+        val slots = mapOf(SLOT_DISPLAY to FocusRequester(), SLOT_RUNTIME to FocusRequester())
+        compose.setContent {
+            DroidDeckTheme {
+                val view = LocalView.current
+                val inputs = LocalInputModeManager.current
+                SideEffect { gpuView = view; inputModeManager = inputs }
+                GpuDriversBody(
+                    gpu = GpuDriversState(
+                        mode = mode, auto = mode == GPU_MODE_AUTO, busy = busy,
+                        pairs = listOf(PairRow(
+                            key = "installed", name = "Installed pair", version = "1", detail = "",
+                            recommended = false, suits = true, complete = true, installed = true, active = false,
+                        )),
+                    ),
+                    actions = GpuDriversActions(
+                        onMode = { modes += it; mode = it },
+                        onPair = { pairs += it },
+                    ),
+                    single = true, first = first, slotFocus = slots, onOpenSlot = { _, _ -> },
+                )
+            }
+        }
+        compose.runOnIdle { inputModeManager.requestInputMode(InputMode.Keyboard) }
+
+        fun pressA() {
+            compose.runOnIdle {
+                val now = SystemClock.uptimeMillis()
+                for ((action, repeat) in listOf(KeyEvent.ACTION_DOWN to 0, KeyEvent.ACTION_DOWN to 1, KeyEvent.ACTION_UP to 0)) {
+                    gpuView.dispatchKeyEvent(KeyEvent(
+                        now, now, action, KeyEvent.KEYCODE_BUTTON_A, repeat, 0, 0, 0, 0, InputDevice.SOURCE_GAMEPAD,
+                    ))
+                }
+            }
+        }
+        fun select(label: String) {
+            compose.onNodeWithText(label).performScrollTo()
+                .performSemanticsAction(SemanticsActions.RequestFocus) { it() }
+                .assertIsFocused()
+            pressA()
+        }
+
+        select(context.getString(R.string.common_auto))
+        compose.runOnIdle { assertEquals(listOf(GPU_MODE_AUTO), modes) }
+        select(context.getString(R.string.gpu_mode_pair))
+        compose.runOnIdle { assertEquals(listOf(GPU_MODE_AUTO, GPU_MODE_PAIR), modes) }
+        select("Installed pair")
+        compose.runOnIdle {
+            assertEquals(listOf("installed"), pairs)
+            busy = "installed"
+        }
+        compose.onNodeWithText("Installed pair").assertIsNotEnabled()
+        pressA()
+        compose.runOnIdle {
+            assertEquals(listOf("installed"), pairs)
+            busy = null
+        }
+        select(context.getString(R.string.gpu_mode_mix))
+        compose.runOnIdle { assertEquals(listOf(GPU_MODE_AUTO, GPU_MODE_PAIR, GPU_MODE_MIX), modes) }
+    }
+
+    @Test fun systemAutoExplainsBuiltinDriversAndRetainsManualModes() {
+        val context = RuntimeEnvironment.getApplication()
+        var chosenMode = GPU_MODE_AUTO
+        compose.setContent {
+            DroidDeckTheme {
+                GpuDriversBody(
+                    gpu = GpuDriversState(
+                        gpuName = "Mali-G715", gpuFamily = "Mali", systemGpu = true,
+                        systemVulkan = true, systemDriverName = "Mali",
+                    ),
+                    actions = GpuDriversActions(onMode = { chosenMode = it }),
+                    single = true,
+                    first = FocusRequester(),
+                    slotFocus = emptyMap(),
+                    onOpenSlot = { _, _ -> },
+                )
+            }
+        }
+
+        compose.onNodeWithText(context.getString(R.string.gpu_auto_builtin_title, "Mali-G715")).assertExists()
+        compose.onAllNodesWithText(context.getString(R.string.gpu_auto_system_hint)).onLast().assertExists()
+        compose.onNodeWithText(context.getString(R.string.gpu_auto_reason, "Mali")).assertDoesNotExist()
+        compose.onNodeWithText(context.getString(R.string.gpu_mode_auto_detail)).assertDoesNotExist()
+        compose.onNodeWithText(context.getString(R.string.gpu_mode_pair)).performScrollTo().performClick()
+        compose.runOnIdle { assertEquals(GPU_MODE_PAIR, chosenMode) }
+        compose.onNodeWithText(context.getString(R.string.gpu_mode_mix)).performScrollTo().performClick()
+        compose.runOnIdle { assertEquals(GPU_MODE_MIX, chosenMode) }
+    }
 
     @Test fun gameProfilesCoexistWithTheDefaultComponentStack() {
         val context = RuntimeEnvironment.getApplication()
