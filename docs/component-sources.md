@@ -130,7 +130,8 @@ pins and the declared numeric repository ID. Missing pins disable automatic
 download; they do not select an unpinned release or another repository.
 
 `-PcomponentRepository=owner/repository` sets the build's initial GPU producer.
-CI otherwise uses `GITHUB_REPOSITORY`; local builds use the GitHub `origin` push
+PR builds set `DROIDDECK_COMPONENT_REPOSITORY` to the PR's head repository. Other
+CI builds use `GITHUB_REPOSITORY`; local builds use the GitHub `origin` push
 repository, or the official repository when no GitHub origin is available. The
 official repository remains a built-in row. A fork build initially seeds its
 producer as a removable source and hides the official row. This happens once;

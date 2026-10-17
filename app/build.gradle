@@ -77,6 +77,7 @@ def localComponentOrigin = gitValue(['remote', 'get-url', '--push', 'origin']) ?
 def componentOriginMatch = localComponentOrigin =~ /^(?:https:\/\/github\.com\/|git@github\.com:)([A-Za-z0-9-]+\/[A-Za-z0-9_.-]+?)(?:\.git)?$/
 def localComponentRepository = componentOriginMatch.matches() ? componentOriginMatch.group(1) : 'Droid-Deck/DroidDeck'
 def componentRepository = providers.gradleProperty('componentRepository')
+    .orElse(providers.environmentVariable('DROIDDECK_COMPONENT_REPOSITORY'))
     .orElse(providers.environmentVariable('GITHUB_REPOSITORY')).orElse(localComponentRepository).get()
 if (!(componentRepository ==~ /[A-Za-z0-9][A-Za-z0-9-]{0,38}\/[A-Za-z0-9_.-]{1,100}/)) {
     throw new GradleException('componentRepository must be a GitHub owner/repository')
