@@ -86,7 +86,7 @@ object ComponentsManager {
         val assetId: Long = 0,
         val localFile: String = file,
     ) {
-        val id: String get() = if (sourceId.isEmpty()) file else "$sourceId:$assetId:${digest.substringAfter(':')}"
+        val id: String get() = if (sourceId.isEmpty()) file else "$comp:$sourceId:$assetId:${digest.substringAfter(':')}"
     }
     data class ProtonView(
         val proton: Proton, val components: Map<String, Component>, val originals: List<Original>, val inUseByGame: Boolean,

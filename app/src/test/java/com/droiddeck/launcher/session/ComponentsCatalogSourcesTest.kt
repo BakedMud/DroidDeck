@@ -87,6 +87,7 @@ class ComponentsCatalogSourcesTest {
 
         val before = ComponentsManager.catalog(context, false)
         assertEquals(setOf("fex", "dxvk"), before.items.map { it.comp }.toSet())
+        assertEquals(2, before.items.map { it.id }.distinct().size)
         assertTrue(before.items.all { it.sourceId == RepositorySources.source("the412banner/nightlies").id })
 
         ComponentsManager.saveSources(context, "dxvk", ComponentsManager.sources(context, "dxvk").map {

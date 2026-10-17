@@ -45,6 +45,7 @@ import androidx.compose.ui.unit.sp
 import com.droiddeck.launcher.R
 import com.droiddeck.launcher.artifact.RepositorySources
 import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.CoroutineDispatcher
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
@@ -65,6 +66,7 @@ internal fun RepositorySourcesButton(
     builtIns: List<String>,
     enabled: Boolean = true,
     title: String = stringResource(R.string.sources_component_title),
+    ioDispatcher: CoroutineDispatcher = Dispatchers.IO,
     onSaved: () -> Unit,
 ) {
     val context = LocalContext.current
@@ -86,7 +88,7 @@ internal fun RepositorySourcesButton(
         loaded = false
         error = null
         try {
-            rows = withContext(Dispatchers.IO) {
+            rows = withContext(ioDispatcher) {
                 RepositorySources.list(context, scopeKey, builtIns).map {
                     SourceDraft(it.id, it.repository, it.hidden, it)
                 }
@@ -202,7 +204,7 @@ internal fun RepositorySourcesButton(
                         error = null
                         coroutineScope.launch {
                             try {
-                                withContext(Dispatchers.IO) { RepositorySources.save(context, scopeKey, builtIns, sources) }
+                                withContext(ioDispatcher) { RepositorySources.save(context, scopeKey, builtIns, sources) }
                                 open = false
                                 onSaved()
                             } catch (cancelled: CancellationException) {

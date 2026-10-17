@@ -1,6 +1,8 @@
 package com.droiddeck.launcher.ui
 
 import android.app.Application
+import androidx.compose.ui.test.assertIsEnabled
+import androidx.compose.ui.test.assertIsNotEnabled
 import androidx.compose.ui.test.onAllNodesWithContentDescription
 import androidx.compose.ui.test.onNodeWithContentDescription
 import androidx.compose.ui.test.onNodeWithText
@@ -8,6 +10,8 @@ import androidx.compose.ui.test.performClick
 import androidx.compose.ui.test.performTextReplacement
 import com.droiddeck.launcher.R
 import com.droiddeck.launcher.artifact.RepositorySources
+import kotlinx.coroutines.CoroutineDispatcher
+import kotlinx.coroutines.Dispatchers
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertTrue
@@ -17,6 +21,8 @@ import org.junit.runner.RunWith
 import org.robolectric.RobolectricTestRunner
 import org.robolectric.RuntimeEnvironment
 import org.robolectric.annotation.Config
+import java.util.ArrayDeque
+import kotlin.coroutines.CoroutineContext
 
 @RunWith(RobolectricTestRunner::class)
 @Config(sdk = [28], application = Application::class)
@@ -26,6 +32,12 @@ class RepositorySourcesEditorTest {
     private val builtIns = listOf("Droid-Deck/DroidDeck")
     private val repository = "droid-deck/droiddeck"
 
+    private class QueuedDispatcher : CoroutineDispatcher() {
+        private val pending = ArrayDeque<Runnable>()
+        override fun dispatch(context: CoroutineContext, block: Runnable) { pending.addLast(block) }
+        fun runPending() { while (pending.isNotEmpty()) pending.removeFirst().run() }
+    }
+
     private fun open() {
         compose.onNodeWithContentDescription(context.getString(R.string.sources_component_title)).performClick()
         compose.waitUntil(5_000) {
@@ -34,11 +46,27 @@ class RepositorySourcesEditorTest {
         }
     }
 
+    @Test fun editingWaitsForTheSourceReadToComplete() {
+        val dispatcher = QueuedDispatcher()
+        compose.setContent {
+            DroidDeckTheme {
+                RepositorySourcesButton("editor/loading", builtIns, ioDispatcher = dispatcher, onSaved = {})
+            }
+        }
+        compose.onNodeWithContentDescription(context.getString(R.string.sources_component_title)).performClick()
+        compose.onNodeWithText(context.getString(R.string.sources_add)).assertIsNotEnabled()
+        compose.onNodeWithText(context.getString(R.string.sources_save)).assertIsNotEnabled()
+        compose.runOnIdle { dispatcher.runPending() }
+        compose.onNodeWithContentDescription(context.getString(R.string.sources_hide, repository)).assertExists()
+        compose.onNodeWithText(context.getString(R.string.sources_add)).assertIsEnabled()
+        compose.onNodeWithText(context.getString(R.string.sources_save)).assertIsEnabled()
+    }
+
     @Test fun hidingIsDraftUntilSaveAndBuiltInCannotBeRemoved() {
         val scope = "editor/hide"
         var saves = 0
         compose.setContent {
-            DroidDeckTheme { RepositorySourcesButton(scope, builtIns, onSaved = { saves++ }) }
+            DroidDeckTheme { RepositorySourcesButton(scope, builtIns, ioDispatcher = Dispatchers.Unconfined, onSaved = { saves++ }) }
         }
         open()
         compose.onNodeWithContentDescription(context.getString(R.string.sources_remove, repository)).assertDoesNotExist()
@@ -52,7 +80,7 @@ class RepositorySourcesEditorTest {
 
     @Test fun closingDiscardsDraft() {
         val scope = "editor/discard"
-        compose.setContent { DroidDeckTheme { RepositorySourcesButton(scope, builtIns, onSaved = {}) } }
+        compose.setContent { DroidDeckTheme { RepositorySourcesButton(scope, builtIns, ioDispatcher = Dispatchers.Unconfined, onSaved = {}) } }
         open()
         compose.onNodeWithContentDescription(context.getString(R.string.sources_hide, repository)).performClick()
         compose.onNodeWithContentDescription(context.getString(R.string.sources_component_title)).performClick()
@@ -65,7 +93,7 @@ class RepositorySourcesEditorTest {
     @Test fun addValidatesRepositoryBeforeSaveAndCustomRowCanBeRemoved() {
         val scope = "editor/add"
         var saves = 0
-        compose.setContent { DroidDeckTheme { RepositorySourcesButton(scope, builtIns, onSaved = { saves++ }) } }
+        compose.setContent { DroidDeckTheme { RepositorySourcesButton(scope, builtIns, ioDispatcher = Dispatchers.Unconfined, onSaved = { saves++ }) } }
         open()
         compose.onNodeWithText(context.getString(R.string.sources_add)).performClick()
         val input = compose.onNodeWithText(context.getString(R.string.sources_repository))
