@@ -51,6 +51,28 @@ not describe its current selection. The old
 `DROIDDECK_POWERVR_RUNTIME` alias remains available for PowerVR and Xclipse helpers.
 Manual driver selections retain their existing behavior.
 
+### Vendor TLS bounds and loader diagnostics
+
+The bridge reserves 1040 bytes for promoted Bionic static TLS. This accommodates
+the XRing O3 report's offset 984 and 41-byte segment while retaining bounds checks.
+The reservation uses glibc initial-exec TLS; increasing it to 4096 bytes would
+conflict with the upstream bridge's documented Firefox late-loading limit. The
+new size is the smallest 16-byte-aligned increase that contains the reported range.
+
+Component CI builds the patched production TLS implementation as a shared library
+and loads it after process startup. Its probe checks the reported range, overflow
+rejection, the last legal byte and replay into a new thread. This does not replace
+testing on XRing or in Firefox. The built `probe-glibc tls-bounds` command exercises
+the same cases against the packaged runtime.
+
+The ICD still requires loader interface version 5. On negotiation rejection it
+logs the offered version; a failed Android `vkCreateInstance` call logs its result
+separately from the existing dispatch-mismatch diagnostic. A generic
+`VK_ERROR_INCOMPATIBLE_DRIVER` does not identify which of these paths failed.
+Capture `VK_LOADER_DEBUG=error,warn,driver` alongside the session log before
+changing the interface contract. `probe-glibc version` checks rejected and
+accepted interface versions without requiring a Vulkan instance.
+
 ### BC decoding and push descriptors
 
 The BC compatibility layer preserves native `VK_KHR_push_descriptor` support.

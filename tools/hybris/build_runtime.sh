@@ -16,6 +16,8 @@ fetch() {
 }
 fetch https://github.com/taowen/libhybris.git "$HYBRIS_REVISION" "$work/libhybris"
 fetch https://github.com/taowen/arlinux-rootfs.git "$PROTOCOL_REVISION" "$work/rootfs"
+HYBRIS_TLS_SOURCE="$work/libhybris" python3 -m unittest discover \
+  -s "$root/tools/tests" -p test_hybris_tls_capacity.py
 # The feature-chain regression compiles patched production source. Supply the
 # pinned checkout explicitly so component CI cannot silently skip this gate.
 HYBRIS_VENDOR_SOURCE="$work/libhybris" python3 -m unittest discover \
