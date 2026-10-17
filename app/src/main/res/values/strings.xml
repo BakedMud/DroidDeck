@@ -1836,7 +1836,7 @@
     <string name="gpuinfo_system_driver">System %1$s driver: compatibility varies by device</string>
     <string name="gpuinfo_system_experimental">Experimental system %1$s driver: compatibility varies by device</string>
     <string name="gpu_system_driver">System %1$s</string>
-    <string name="gpu_auto_system_hint">Uses the built-in drivers for this GPU</string>
+    <string name="gpu_auto_system_hint">Downloads the matching GPU component when needed</string>
     <string name="drivers_system_builtin">The system %1$s driver is selected for the runtime and display.</string>
     <string name="drivers_system_experimental_builtin">The experimental system %1$s driver is selected for the runtime and display.</string>
     <string name="cmgr_powervr_dxvk_queued">Queued: %1$s (waiting for a different runtime driver)</string>
@@ -2675,4 +2675,21 @@
     <string name="boot_movie_converting_started">Converting %1$s for Steam. Keep DroidDeck open.</string>
     <string name="boot_movie_unsupported">This device cannot decode that video.</string>
     <string name="boot_movie_import_failed">Could not import that movie</string>
+    <string name="sources_component_title">Component Sources</string>
+    <string name="gpu_auto_system_title">Auto uses the system driver for your %1$s</string>
+    <string name="gpu_component_required">Download the GPU component in Components before starting a session.</string>
+    <string name="sources_updates_title">Update Sources</string>
+    <string name="sources_repository">GitHub owner/repository</string>
+    <string name="sources_add">Add repository</string>
+    <string name="sources_remove">Remove %1$s</string>
+    <string name="sources_hide">Hide %1$s</string>
+    <string name="sources_show">Show %1$s</string>
+    <string name="sources_save">Save</string>
+    <string name="sources_saving">Saving…</string>
+    <string name="sources_hidden_note">Hidden sources stop checks and hide available downloads. Downloaded components stay available.</string>
+    <string name="sources_load_error">Could not read repository sources. Close this menu and try again.</string>
+    <string name="sources_save_error">Could not save repository sources. Check for duplicate repositories and try again.</string>
+    <string name="sources_invalid_repository">Use owner/repository or an HTTPS GitHub repository URL.</string>
+    <string name="sources_update_from">Update from</string>
+    <string name="sources_selected_unavailable">Selected source is hidden or removed</string>
 </resources>

@@ -135,6 +135,8 @@ class GpuDriversState(
     val runtime: DriverSlot = DriverSlot(),
     val canRestart: Boolean = true,
     val checkedAt: Long = 0L,
+    val sourceKey: String = "",
+    val sourceBuiltIns: List<String> = emptyList(),
 ) {
     val activePair: PairRow? get() = pairs.firstOrNull { it.active }
 }
@@ -154,6 +156,7 @@ class GpuDriversActions(
     val onRestoreBundled: () -> Unit = {},
     val onMode: (String) -> Unit = {},
     val onRestart: () -> Unit = {},
+    val onSourcesChanged: () -> Unit = {},
 )
 
 @Composable
@@ -338,7 +341,11 @@ private fun AutoBody(gpu: GpuDriversState) {
     val colors = MaterialTheme.colorScheme
     Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
         PanelTitle(
-            stringResource(if (!gpu.systemGpu && gpu.activePair != null) R.string.gpu_auto_title else R.string.gpu_auto_builtin_title, gpu.gpuName),
+            stringResource(when {
+                gpu.systemGpu -> R.string.gpu_auto_system_title
+                gpu.activePair != null -> R.string.gpu_auto_title
+                else -> R.string.gpu_auto_builtin_title
+            }, gpu.gpuName),
             if (gpu.systemGpu) stringResource(R.string.gpu_auto_system_hint) else stringResource(R.string.gpu_auto_reason, gpu.gpuFamily),
         )
         if (!gpu.systemGpu) gpu.activePair?.let { p -> PanelRow(p.name, "${p.version} · ${p.detail}", selected = true, onClick = null) }

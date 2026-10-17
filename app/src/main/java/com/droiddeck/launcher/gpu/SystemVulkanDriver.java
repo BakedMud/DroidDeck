@@ -6,11 +6,9 @@ import android.system.ErrnoException;
 import android.system.Os;
 import android.system.OsConstants;
 import com.droiddeck.launcher.core.FileUtils;
-import com.droiddeck.launcher.core.TarZst;
 import java.io.File;
 import java.io.IOException;
 import java.io.BufferedReader;
-import java.io.InputStreamReader;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
@@ -18,11 +16,9 @@ import java.util.List;
 import java.util.TreeSet;
 import java.util.UUID;
 import java.util.function.Predicate;
-import org.json.JSONObject;
 
 /** Isolated glibc-to-Android Vulkan bridge. It does not replace the rootfs's Mesa libraries. */
 public final class SystemVulkanDriver {
-    private static final String ASSET = "hybris/runtime.tzst";
     /** Vendor policy is independent from the shared libhybris HAL loader and Vulkan layer. */
     public enum Profile {
         POWERVR("powervr", "PowerVR", "/vendor/lib64/hw/vulkan.powervr.so", true,
@@ -205,7 +201,7 @@ public final class SystemVulkanDriver {
         return systemGpu && (choice == null || choice.isEmpty());
     }
 
-    /** APK-versioned directories stay intact while an older session still has libraries mapped. */
+    /** Capture the active immutable component for callers that only need its directory. */
     public static synchronized File prepare(Context context) throws IOException {
         return prepare(context, false);
     }
@@ -215,41 +211,16 @@ public final class SystemVulkanDriver {
      * the session layer has established that no app-owned guest can still have it mapped.
      */
     public static synchronized File prepare(Context context, boolean guestsStopped) throws IOException {
+        return prepareSnapshot(context, guestsStopped).getDirectory();
+    }
+
+    public static synchronized SystemVulkanComponentStore.Snapshot prepareSnapshot(
+            Context context, boolean guestsStopped) throws IOException {
         Profile selected = profile();
         if (selected == null) throw new IOException("System Vulkan driver is unavailable");
         if (selected.requiresRenderNode && !renderNodeAvailable()) throw new IOException(
                 "System " + selected.gpuName + " requires an identifiable, readable and writable DRM render node");
-        File target = runtimeDirectory(context);
-        File base = target.getParentFile();
-        if (!managedRuntimePath(target) || Files.isSymbolicLink(base.toPath())
-                || Files.isSymbolicLink(target.toPath()))
-            throw new IOException("Unsafe system Vulkan runtime path");
-        if (complete(target)) return target;
-        if (!base.isDirectory() && !base.mkdirs()) throw new IOException("Cannot create system Vulkan directory");
-        File quarantined = quarantineIncompleteTarget(target, guestsStopped);
-        File staged = new File(base, ".stage-" + UUID.randomUUID());
-        try {
-            if (!TarZst.extractAsset(context, ASSET, staged)) throw new IOException("Cannot unpack system Vulkan runtime");
-            for (String name : REQUIRED)
-                if (!present(staged, name)) throw new IOException("Missing system Vulkan component: " + name);
-            if (!new File(staged, "run-proton.py").canExecute())
-                throw new IOException("System Vulkan Proton wrapper is not executable");
-            JSONObject library = new JSONObject();
-            library.put("library_path", new File(target, REQUIRED[0]).getPath());
-            library.put("api_version", "1.3.0");
-            JSONObject manifest = new JSONObject();
-            manifest.put("file_format_version", "1.0.0");
-            manifest.put("ICD", library);
-            Files.write(new File(staged, "icd.json").toPath(), manifest.toString().getBytes(StandardCharsets.UTF_8));
-            if (target.exists()) throw new IOException("Incomplete system Vulkan runtime directory: " + target.getName());
-            if (!staged.renameTo(target)) throw new IOException("Cannot publish system Vulkan runtime");
-            if (quarantined != null) FileUtils.delete(quarantined);
-            return target;
-        } catch (org.json.JSONException error) {
-            throw new IOException("Cannot write system Vulkan manifest", error);
-        } finally {
-            if (staged.exists()) FileUtils.delete(staged);
-        }
+        return SystemVulkanComponentStore.capture(context, selected, guestsStopped);
     }
 
     /** Atomically move an interrupted managed install aside without traversing its contents. */
@@ -268,20 +239,15 @@ public final class SystemVulkanDriver {
         return quarantined;
     }
 
-    /** The current APK's versioned runtime path, without extracting or modifying it. */
+    /** The active component path. Kept for callers migrating from the APK-backed runtime. */
     public static File runtimeDirectory(Context context) throws IOException {
-        String version;
-        try (BufferedReader input = new BufferedReader(new InputStreamReader(
-                context.getAssets().open("hybris/version.txt"), StandardCharsets.US_ASCII))) {
-            version = input.readLine();
-        }
-        if (version == null || !version.matches("[0-9a-f]{64}")) throw new IOException("Invalid system Vulkan runtime version");
-        return new File(new File(context.getFilesDir(), "system_vulkan"), version);
+        return prepare(context);
     }
 
     /** Collect abandoned stages, and obsolete versions once older guests can no longer load them. */
     public static synchronized void pruneUnused(Context context, boolean guestsStopped) throws IOException {
-        pruneUnused(runtimeDirectory(context), guestsStopped);
+        Profile selected = profile();
+        if (selected != null) SystemVulkanComponentStore.prune(context, selected, guestsStopped);
     }
 
     static synchronized void pruneUnused(File current, boolean guestsStopped) {
@@ -331,11 +297,27 @@ public final class SystemVulkanDriver {
     }
 
     public static void addEnvironment(Context context, List<String> environment) {
-        File directory;
-        try { directory = prepare(context); }
+        SystemVulkanComponentStore.Snapshot snapshot;
+        try { snapshot = prepareSnapshot(context, false); }
         catch (IOException error) { throw new IllegalStateException("System Vulkan runtime is unavailable", error); }
-        addEnvironment(directory, systemHalPath(), requiresRenderNode() ? renderNodePath() : null,
+        addEnvironment(snapshot, environment);
+    }
+
+    public static String icdPath(SystemVulkanComponentStore.Snapshot snapshot) {
+        return new File(snapshot.getDirectory(), "icd.json").getPath();
+    }
+
+    public static void addEnvironment(SystemVulkanComponentStore.Snapshot snapshot, List<String> environment) {
+        Profile selected = profile();
+        if (selected == null || !selected.id.equals(snapshot.getVariant()))
+            throw new IllegalStateException("System Vulkan component does not match this GPU");
+        addEnvironment(snapshot.getDirectory(), selected.halPath, selected.requiresRenderNode ? renderNodePath() : null,
                 Build.VERSION.SDK_INT, environment);
+    }
+
+    public static boolean isReady(Context context) {
+        Profile selected = profile();
+        return selected != null && isAvailable() && SystemVulkanComponentStore.isReady(context, selected);
     }
 
     static void addEnvironment(File directory, String hal, String node, int sdk, List<String> environment) {

@@ -12,6 +12,8 @@ object DeviceSupport {
 
     fun graphicsAvailable(): Boolean = graphicsAvailable(adreno(), SystemVulkanDriver.isAvailable())
 
+    fun graphicsReady(context: Context): Boolean = adreno() || SystemVulkanDriver.isReady(context)
+
     internal fun graphicsAvailable(adreno: Boolean, systemVulkanReady: Boolean): Boolean = adreno || systemVulkanReady
 
     fun gpuName(context: Context): String {

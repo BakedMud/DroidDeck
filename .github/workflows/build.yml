@@ -20,7 +20,7 @@ on:
       component:
         description: 'Build an APK, libhybris component, or GPU-specific DXVK component for review'
         type: choice
-        options: [apk, hybris, dxvk-mali, dxvk-xclipse]
+        options: [apk, system-vulkan, hybris, dxvk-mali, dxvk-xclipse]
         default: apk
 
 permissions:
@@ -35,6 +35,42 @@ env:
   PRELOAD_CACHE_VERSION: v4
 
 jobs:
+  system-vulkan:
+    name: Package System Vulkan components
+    if: github.event_name == 'workflow_dispatch' && inputs.component == 'system-vulkan'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install archive tools
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y zstd
+      - name: Validate and package pinned components
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          python3 -m unittest tools.tests.test_powervr_runtime tools.tests.test_system_vulkan_components
+          repository_id=$(gh api "repos/${GITHUB_REPOSITORY}" --jq .id)
+          version="${GITHUB_SHA:0:12}"
+          python3 tools/powervr/package_components.py \
+            --output out/system-vulkan \
+            --repository "$GITHUB_REPOSITORY" \
+            --repository-id "$repository_id" \
+            --commit "$GITHUB_SHA" \
+            --build-url "https://github.com/${GITHUB_REPOSITORY}/actions/runs/${GITHUB_RUN_ID}" \
+            --release-tag "system-vulkan-${GITHUB_SHA}" \
+            --version "$version"
+          sha256sum out/system-vulkan/* > out/system-vulkan/SHA256SUMS
+      - uses: actions/upload-artifact@v4
+        with:
+          name: system-vulkan-${{ github.sha }}
+          path: out/system-vulkan/
+          if-no-files-found: error
+
   hybris:
     name: Build runtime components
     if: github.event_name == 'workflow_dispatch' && (inputs.component == 'hybris' || inputs.component == 'dxvk-mali' || inputs.component == 'dxvk-xclipse')
@@ -545,7 +581,6 @@ jobs:
           SGDB_API_KEY: ${{ secrets.SGDB_API_KEY }}
         run: |
           set -o pipefail
-          python3 tools/powervr/fetch.py
           python3 tools/quest/build-driver.py "$ANDROID_HOME/ndk/$NDK_VERSION"
           python3 tools/release/runtime_inputs.py record
           ./gradlew assembleRelease --console=plain -PndkVersion="$NDK_VERSION" 2>&1 | tee /tmp/build.log

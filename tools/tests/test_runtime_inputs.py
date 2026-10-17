@@ -7,7 +7,6 @@ import tarfile
 import tempfile
 import unittest
 from unittest import mock
-from unittest.mock import patch
 from zipfile import ZipFile
 
 
@@ -21,10 +20,6 @@ class RuntimeInputsTest(unittest.TestCase):
         self.temp = tempfile.TemporaryDirectory()
         self.addCleanup(self.temp.cleanup)
         self.root = Path(self.temp.name)
-        # Component archive validation has its own binary/archive fixtures.
-        component_check = patch.object(runtime, 'verify_powervr')
-        component_check.start()
-        self.addCleanup(component_check.stop)
         paths = runtime.outputs(self.root)
         for name in runtime.required():
             path = self.root / paths.get(name, 'app/src/main/' + name)
@@ -60,20 +55,6 @@ class RuntimeInputsTest(unittest.TestCase):
         self.source.write_text('new implementation')
         with self.assertRaisesRegex(ValueError, 'sources changed'):
             runtime.verify(self.root)
-
-    def test_changed_powervr_wrapper_rejects_old_outputs(self):
-        wrapper = self.root / 'tools/hybris/run-proton.py'
-        wrapper.parent.mkdir(parents=True)
-        wrapper.write_text('current wrapper')
-        runtime.record(self.root)
-        wrapper.write_text('changed wrapper')
-        with self.assertRaisesRegex(ValueError, 'sources changed'):
-            runtime.verify(self.root)
-
-    def test_missing_powervr_bundle_cannot_be_attested(self):
-        (self.root / 'app/src/main/assets/hybris/runtime.tzst').unlink()
-        with self.assertRaisesRegex(ValueError, 'assets/hybris/runtime.tzst'):
-            runtime.record(self.root)
 
     def test_changed_quest_source_rejects_old_outputs(self):
         source = self.root / 'tools/quest/kgsl_compat.c'

@@ -123,7 +123,7 @@ class ComponentsPageProfileTest {
         compose.runOnIdle { assertEquals(listOf(GPU_MODE_AUTO, GPU_MODE_PAIR, GPU_MODE_MIX), modes) }
     }
 
-    @Test fun systemAutoExplainsBuiltinDriversAndRetainsManualModes() {
+    @Test fun systemAutoExplainsMatchingComponentsAndRetainsManualModes() {
         val context = RuntimeEnvironment.getApplication()
         var chosenMode = GPU_MODE_AUTO
         compose.setContent {
@@ -142,7 +142,7 @@ class ComponentsPageProfileTest {
             }
         }
 
-        compose.onNodeWithText(context.getString(R.string.gpu_auto_builtin_title, "Mali-G715")).assertExists()
+        compose.onNodeWithText(context.getString(R.string.gpu_auto_system_title, "Mali-G715")).assertExists()
         compose.onAllNodesWithText(context.getString(R.string.gpu_auto_system_hint)).onLast().assertExists()
         compose.onNodeWithText(context.getString(R.string.gpu_auto_reason, "Mali")).assertDoesNotExist()
         compose.onNodeWithText(context.getString(R.string.gpu_mode_auto_detail)).assertDoesNotExist()

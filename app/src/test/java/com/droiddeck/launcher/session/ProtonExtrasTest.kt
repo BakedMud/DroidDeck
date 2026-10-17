@@ -1,6 +1,7 @@
 package com.droiddeck.launcher.session
 
 import com.droiddeck.launcher.runtime.LinuxRuntime
+import com.droiddeck.launcher.artifact.RepositorySources
 import org.json.JSONArray
 import org.json.JSONObject
 import org.junit.Assert.assertEquals
@@ -52,7 +53,7 @@ class ProtonExtrasTest {
         val droiddeck = tool("droiddeck")
         assertEquals("DroidDeck-Proton", droiddeck.name)
         assertEquals("DroidDeck-Proton", droiddeck.prefix)
-        assertEquals("Droid-Deck/DroidDeck-Proton", droiddeck.repo)
+        assertEquals("droid-deck/droiddeck-proton", droiddeck.repo)
         assertTrue(droiddeck.assetPattern.containsMatchIn("DroidDeck-Proton-11-7.5-aarch64.tar.gz"))
         assertTrue(droiddeck.assetPattern.containsMatchIn("DroidDeck-Proton-11-8-aarch64.tar.xz"))
         assertFalse(droiddeck.assetPattern.containsMatchIn("DroidDeck-Proton-11-7.5-aarch64.sha512sum"))
@@ -106,6 +107,21 @@ class ProtonExtrasTest {
         assertEquals(listOf(11L, 0L, 20261005L), ProtonExtras.versionKey("proton-cachyos-11.0-20261005-slr-arm64"))
         assertEquals(listOf(11L, 7L, 5L), ProtonExtras.versionKey("DroidDeck-Proton 11-7.5"))
         assertEquals(ProtonExtras.versionKey("DroidDeck-Proton-11-7.5"), ProtonExtras.versionKey("DroidDeck-Proton 11-7.5"))
+    }
+
+    @Test
+    fun sourceHashesDoNotChangeVersionOrderOrWhichOlderBuildIsRemoved() {
+        val context = RuntimeEnvironment.getApplication()
+        val directory = File(LinuxRuntime.rootDir(context), "root/.local/share/Steam/compatibilitytools.d")
+        val older = "GE-Proton11-7--dd-${"9a".repeat(32)}-${"8c".repeat(32)}"
+        val newer = "GE-Proton11-7.1--dd-${"1b".repeat(32)}-${"2d".repeat(32)}"
+        installTool(directory, older)
+        installTool(directory, newer)
+        assertEquals(listOf(11L, 7L), ProtonExtras.versionKey(older))
+        assertEquals(listOf(older, newer), ProtonExtras.installedAll(context, tool("ge")))
+        ProtonExtras.removeOlder(context, tool("ge"))
+        assertFalse(File(directory, older).exists())
+        assertTrue(File(directory, newer).isDirectory)
     }
 
     @Test
@@ -170,5 +186,46 @@ class ProtonExtrasTest {
         ProtonExtras.removeOlder(context, tool("droiddeck"))
         assertEquals(listOf("DroidDeck-Proton 11-7.10"), ProtonExtras.installedAll(context, tool("droiddeck")))
         assertEquals("DroidDeck-Proton 11-7.10", ProtonExtras.installed(context, tool("droiddeck")))
+    }
+
+    @Test
+    fun hiddenSourceStopsChecksButItsInstalledBuildRemainsVisible() {
+        val context = RuntimeEnvironment.getApplication()
+        val ge = tool("ge")
+        val toolsDir = File(LinuxRuntime.rootDir(context), "root/.local/share/Steam/compatibilitytools.d")
+        installTool(toolsDir, "GE-Proton11-7")
+        val rows = ProtonExtras.sources(context).map {
+            if (it.repository == ge.repo) it.copy(hidden = true) else it
+        }
+        ProtonExtras.saveSources(context, rows)
+        assertTrue(ProtonExtras.availableTools(context).none { it.id == ge.id })
+        assertEquals(listOf("GE-Proton11-7"), ProtonExtras.installedAll(context, ge))
+    }
+
+    @Test
+    fun compatibleForkToolKeepsRepositoryIdentityInItsRow() {
+        val context = RuntimeEnvironment.getApplication()
+        val custom = RepositorySources.source("wallentx/proton-ge-custom")
+        ProtonExtras.saveSources(context, ProtonExtras.sources(context) + custom)
+        val id = "${custom.id.take(12)}-ge"
+        File(context.filesDir, "proton-latest.json").writeText(JSONObject()
+            .put(id, JSONObject().put("tag", "GE-Proton11-8").put("at", 1L)
+                .put("sourceId", custom.id).put("baseId", "ge").put("name", "wallentx/proton-ge-custom · GE-Proton"))
+            .toString())
+        val fork = ProtonExtras.availableTools(context).single { it.id == id }
+        assertEquals("wallentx/proton-ge-custom", fork.repo)
+        assertTrue(fork.name.contains(fork.repo))
+    }
+
+    @Test
+    fun receiptToolIdentityOwnsInstallEvenWhenItsPrefixChanges() {
+        val directory = temp.newFolder("receipt-tools")
+        val installed = installTool(directory, "Foo-Proton-1--dd-${"a".repeat(64)}-${"b".repeat(64)}")
+        File(installed, ".droiddeck-source.json").writeText(JSONObject()
+            .put("sourceId", "source-1").put("toolId", "manifest-one").toString())
+        val owner = ProtonExtras.Tool("manifest-one", "One", "Bar-Proton", "owner/proton", Regex("a^"), "source-1", "manifest")
+        val sibling = ProtonExtras.Tool("known-one", "Known", "Foo-Proton", "owner/proton", Regex("a^"), "source-1", "ge")
+        assertEquals(listOf(installed.name), ProtonExtras.installedIn(directory, owner))
+        assertTrue(ProtonExtras.installedIn(directory, sibling).isEmpty())
     }
 }

@@ -1,6 +1,5 @@
 """Reject an APK with missing or stale session helpers, including cached local bundles."""
 from pathlib import Path
-import importlib.util
 import re
 import sys
 from zipfile import ZipFile
@@ -41,6 +40,9 @@ def source_assets(overlay=OVERLAY):
 def check(apk, overlay=OVERLAY):
     errors = check_extraction(overlay, SESSION_FILES.read_text()) if overlay == OVERLAY else []
     with ZipFile(apk) as package:
+        embedded_system_vulkan = sorted(name for name in package.namelist() if name.startswith('assets/hybris/'))
+        if embedded_system_vulkan:
+            errors.append('embedded System Vulkan payload must not ship in the APK: ' + ', '.join(embedded_system_vulkan))
         for source, asset in source_assets(overlay).items():
             try:
                 content = package.read(asset)
@@ -49,16 +51,6 @@ def check(apk, overlay=OVERLAY):
                 continue
             if content != source.read_bytes():
                 errors.append('stale ' + asset)
-        if overlay == OVERLAY:
-            spec = importlib.util.spec_from_file_location('powervr_fetch',
-                    OVERLAY.parents[1] / 'powervr/fetch.py')
-            runtime = importlib.util.module_from_spec(spec)
-            spec.loader.exec_module(runtime)
-            try:
-                runtime.verify_archive(package.read('assets/hybris/runtime.tzst'),
-                                       package.read('assets/hybris/version.txt').decode('ascii'))
-            except (KeyError, ValueError, OSError) as error:
-                errors.append('invalid PowerVR runtime: ' + str(error))
     return errors
 
 

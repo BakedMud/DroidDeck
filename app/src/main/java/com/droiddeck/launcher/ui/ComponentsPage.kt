@@ -81,6 +81,7 @@ import com.droiddeck.launcher.R
 import com.droiddeck.launcher.session.ComponentsManager
 import com.droiddeck.launcher.session.ComponentsManager.CatalogItem
 import com.droiddeck.launcher.session.ComponentsManager.Snapshot
+import com.droiddeck.launcher.session.ProtonExtras
 import kotlinx.coroutines.delay
 import androidx.compose.foundation.layout.widthIn
 import androidx.compose.runtime.rememberCoroutineScope
@@ -159,6 +160,7 @@ fun ComponentsPage(
     protons: ProtonsState = ProtonsState(),
     protonActions: ProtonsActions = ProtonsActions(),
     protonOptions: @Composable () -> Unit = {},
+    onSourcesChanged: (String) -> Unit = { onRefresh() },
 ) {
     val colors = MaterialTheme.colorScheme
     val pal = LocalPalette.current
@@ -594,8 +596,8 @@ fun ComponentsPage(
                 val available = availableFor(l, catalog, snapshot)
                 if (available.isEmpty()) EmptyLine(if (catalogAt == 0L) stringResource(R.string.comp_refresh_to_list) else stringResource(R.string.comp_nothing_new))
                 for (d in available) GetLine(
-                    d.file.removeSuffix(".wcp"), "${d.release} · " + stringResource(R.string.common_size_mb, d.size / 1048576.0),
-                    progress = downloads[d.file], enabled = busy == null,
+                    d.file.removeSuffix(".wcp"), "${d.repository} · ${d.release} · " + stringResource(R.string.common_size_mb, d.size / 1048576.0),
+                    progress = downloads[d.id], enabled = busy == null,
                 ) { onDownload(d) }
             }
         }
@@ -722,6 +724,20 @@ fun ComponentsPage(
                     fontSize = 13.sp, color = colors.onSurfaceVariant, maxLines = 1, overflow = TextOverflow.Ellipsis,
                 )
                 val refreshing = checking || gpu.checking
+                RepositorySourcesButton(
+                    scopeKey = when (layer) {
+                        GPU_TAB -> gpu.sourceKey
+                        PROTON_TAB -> ProtonExtras.SOURCE_SCOPE
+                        else -> ComponentsManager.sourceScope(layer)
+                    },
+                    builtIns = when (layer) {
+                        GPU_TAB -> gpu.sourceBuiltIns
+                        PROTON_TAB -> ProtonExtras.sourceBuiltIns()
+                        else -> ComponentsManager.sourceBuiltIns(layer)
+                    },
+                    enabled = busy == null && gpu.busy == null && (layer != PROTON_TAB || protons.busyId == null),
+                    onSaved = { if (layer == GPU_TAB) gpuActions.onSourcesChanged() else onSourcesChanged(layer) },
+                )
                 ToolIcon(Icons.Outlined.Refresh, stringResource(R.string.comp_check_all), busy = refreshing, enabled = !refreshing && gpu.busy == null) {
                     onRefresh(); gpuActions.onRefresh()
                 }
@@ -936,7 +952,7 @@ private fun installedFor(l: String, view: ComponentsManager.ProtonView?, snapsho
 
 private fun availableFor(l: String, catalog: List<CatalogItem>, snapshot: Snapshot?): List<CatalogItem> {
     val stored = (snapshot?.packages ?: emptyList()).map { it.file }.toSet()
-    return catalog.filter { it.comp == l && ComponentsManager.safeName(it.file) !in stored }
+    return catalog.filter { it.comp == l && it.localFile !in stored }
 }
 
 @Composable

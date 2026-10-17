@@ -38,6 +38,17 @@ class SessionAssetsTest(unittest.TestCase):
             package.writestr(self.name, self.helper.read_bytes())
         self.assertEqual([], assets.check(self.apk, self.overlay))
 
+    def test_apk_rejects_embedded_system_vulkan_payloads(self):
+        with ZipFile(self.apk, 'w') as package:
+            package.writestr(self.name, self.helper.read_bytes())
+            package.writestr('assets/hybris/runtime.tzst', b'old bundled runtime')
+            package.writestr('assets/hybris/version.txt', b'0' * 64)
+        self.assertEqual(
+            ['embedded System Vulkan payload must not ship in the APK: '
+             'assets/hybris/runtime.tzst, assets/hybris/version.txt'],
+            assets.check(self.apk, self.overlay),
+        )
+
     def test_bundled_helper_must_also_be_extracted(self):
         self.assertEqual(['not extracted at session start: usr/local/bin/droiddeck-login1'],
                          assets.check_extraction(self.overlay, ''))

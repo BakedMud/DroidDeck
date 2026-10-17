@@ -1,0 +1,19 @@
+{
+  "profiles": {
+    "mali": {
+      "manifestSha256": "",
+      "tag": ""
+    },
+    "powervr": {
+      "manifestSha256": "",
+      "tag": ""
+    },
+    "xclipse": {
+      "manifestSha256": "",
+      "tag": ""
+    }
+  },
+  "repository": "wallentx/droiddeck",
+  "repositoryId": 1406436811,
+  "schema": 1
+}

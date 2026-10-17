@@ -14,10 +14,11 @@ internal class ProtonMenu(private val activity: android.app.Activity, private va
     var protonBusyId by mutableStateOf<String?>(null)
     var protonStage by mutableStateOf<String?>(null)
     var protonPercent by mutableIntStateOf(-1)
-    private val checking = java.util.concurrent.atomic.AtomicBoolean(false)
+    private val inFlightChecks = java.util.concurrent.atomic.AtomicInteger(0)
+    private val checkRequest = java.util.concurrent.atomic.AtomicInteger(0)
 
     fun installProton(id: String) {
-        val tool = ProtonExtras.tools.firstOrNull { it.id == id } ?: return
+        val tool = ProtonExtras.availableTools(activity).firstOrNull { it.id == id } ?: return
         if (protonBusyId != null || SessionState.running) return
         ProtonExtras.unqueue(activity, tool)
         protonBusyId = id
@@ -38,7 +39,7 @@ internal class ProtonMenu(private val activity: android.app.Activity, private va
     }
 
     fun removeProton(id: String, dir: String? = null, older: Boolean = false) {
-        val tool = ProtonExtras.tools.firstOrNull { it.id == id } ?: return
+        val tool = ProtonExtras.displayTools(activity).firstOrNull { it.id == id } ?: return
         if (protonBusyId != null || SessionState.running) return
         protonBusyId = id
         protonStage = activity.getString(R.string.main_removing_named, dir ?: tool.name)
@@ -54,17 +55,27 @@ internal class ProtonMenu(private val activity: android.app.Activity, private va
     }
 
     fun refreshProtons() {
-        protonRows = ProtonExtras.tools.map {
+        val available = ProtonExtras.availableTools(activity).map { it.id }.toSet()
+        protonRows = ProtonExtras.displayTools(activity).map {
             val all = ProtonExtras.installedAll(activity, it)
-            ProtonRow(it.id, it.name, all.lastOrNull(), ProtonExtras.queued(activity, it), all, ProtonExtras.update(activity, it))
+            ProtonRow(it.id, it.name, all.lastOrNull(), ProtonExtras.queued(activity, it), all,
+                if (it.id in available) ProtonExtras.update(activity, it) else null)
         }
     }
 
     fun checkUpdates(force: Boolean = false) {
-        if (!checking.compareAndSet(false, true)) return
+        if (!force && inFlightChecks.get() > 0) return
+        val id = checkRequest.incrementAndGet()
+        inFlightChecks.incrementAndGet()
         Thread({
-            val asked = try { ProtonExtras.checkLatest(activity, force) } catch (_: Throwable) { false } finally { checking.set(false) }
-            if (asked) ui.post { refreshProtons() }
+            val asked = try { ProtonExtras.checkLatest(activity, force) } catch (_: Throwable) { false } finally { inFlightChecks.decrementAndGet() }
+            if (asked) ui.post { if (id == checkRequest.get()) refreshProtons() }
         }, "proton-updates").start()
+    }
+
+    fun sourcesChanged() {
+        checkRequest.incrementAndGet()
+        refreshProtons()
+        checkUpdates(force = true)
     }
 }

@@ -298,27 +298,98 @@
           "path": "dxvk-2.6.2/x64/dxgi.dll",
           "sha256": "326f68a92534f879fe09594782fdd4c2b69f62e372231ee9ab37dec189b566f0",
           "size": 2449408
+        },
+        {
+          "mode": 420,
+          "name": "dxvk-2.6.2/LICENSE",
+          "path": "licenses/dxvk-xclipse/LICENSE",
+          "sha256": "a5cb1a6ded7d2d7e92d550ba28edd21be2d1d4044662b399887351023e30ce64",
+          "size": 1074
+        },
+        {
+          "mode": 420,
+          "name": "dxvk-2.6.2/patches/0001-check-direct3d-bc-formats.patch",
+          "path": "provenance/dxvk-xclipse/patches/0001-check-direct3d-bc-formats.patch",
+          "sha256": "d5721e702e1b71bd2504626cd644cb47a80f4ebd10b9a69caa195699f61d1fd0",
+          "size": 5807
+        },
+        {
+          "mode": 420,
+          "name": "dxvk-2.6.2/provenance/SHA256SUMS",
+          "path": "provenance/dxvk-xclipse/SHA256SUMS",
+          "sha256": "2b1d811e6ec1d912884c5a0a56be33ce1e06b64f798d334e323a41b38fb75e7a",
+          "size": 2055
+        },
+        {
+          "mode": 420,
+          "name": "dxvk-2.6.2/provenance/build-manifest.json",
+          "path": "provenance/dxvk-xclipse/build-manifest.json",
+          "sha256": "63c62ecf5d99de95db5a2f48efe693c9ab818a110f321f6f92cfda0cb978fadf",
+          "size": 333
+        },
+        {
+          "mode": 420,
+          "name": "dxvk-2.6.2/provenance/build-recipe.json",
+          "path": "provenance/dxvk-xclipse/build-recipe.json",
+          "sha256": "28a9c54874b83c0e00c11cb905b5dea46192f97aeb2f5dc181584472c32a0573",
+          "size": 573
+        },
+        {
+          "mode": 420,
+          "name": "dxvk-2.6.2/provenance/compiler.txt",
+          "path": "provenance/dxvk-xclipse/compiler.txt",
+          "sha256": "1a3b92e08f65add482046ceee4a9ac6fe57d59ada9ef0c8508c6d1ba8638f969",
+          "size": 984
+        },
+        {
+          "mode": 420,
+          "name": "dxvk-2.6.2/provenance/downstream.patch",
+          "path": "provenance/dxvk-xclipse/downstream.patch",
+          "sha256": "3c942dfedfd766df86592e0e08199c40930df086974e337e456e878f7bc0cceb",
+          "size": 5869
+        },
+        {
+          "mode": 420,
+          "name": "dxvk-2.6.2/provenance/pe-inventory.json",
+          "path": "provenance/dxvk-xclipse/pe-inventory.json",
+          "sha256": "81ce34dddfa7a6b943068df729f205d6e1e990a3eff4db0bc1b685a46eb99a1c",
+          "size": 8223
+        },
+        {
+          "mode": 420,
+          "name": "dxvk-2.6.2/provenance/sourcearchive.tar.zst",
+          "path": "provenance/dxvk-xclipse/sourcearchive.tar.zst",
+          "sha256": "c7fd673616a522e301cb347de43ff0ed54a3926ac74bd3c84939fc0d69d4cfe3",
+          "size": 4363521
+        },
+        {
+          "mode": 420,
+          "name": "dxvk-2.6.2/provenance/submodules.txt",
+          "path": "provenance/dxvk-xclipse/submodules.txt",
+          "sha256": "1046f25b81c314ca87387f5a61a7cdcf38c5e211c31afa1a705e28f4aa11cdef",
+          "size": 297
+        },
+        {
+          "mode": 420,
+          "name": "dxvk-2.6.2/provenance/tool-versions.txt",
+          "path": "provenance/dxvk-xclipse/tool-versions.txt",
+          "sha256": "dc570fbc053b6a77fad92ec792312ed4ff9aa713af4d235eb958a67f726ab221",
+          "size": 1093
+        },
+        {
+          "mode": 420,
+          "name": "dxvk-2.6.2/source-commit",
+          "path": "provenance/dxvk-xclipse/source-commit",
+          "sha256": "fd3374db9ddaffcfa30c1ff55117583a9ccd5466ebf9580ee90e7bd8547e594f",
+          "size": 41
         }
       ],
       "format": "tar.gz",
       "id": "dxvk-xclipse",
-      "ignored": [
-        "dxvk-2.6.2/LICENSE",
-        "dxvk-2.6.2/patches/0001-check-direct3d-bc-formats.patch",
-        "dxvk-2.6.2/provenance/SHA256SUMS",
-        "dxvk-2.6.2/provenance/build-manifest.json",
-        "dxvk-2.6.2/provenance/build-recipe.json",
-        "dxvk-2.6.2/provenance/compiler.txt",
-        "dxvk-2.6.2/provenance/downstream.patch",
-        "dxvk-2.6.2/provenance/pe-inventory.json",
-        "dxvk-2.6.2/provenance/sourcearchive.tar.zst",
-        "dxvk-2.6.2/provenance/submodules.txt",
-        "dxvk-2.6.2/provenance/tool-versions.txt",
-        "dxvk-2.6.2/source-commit"
-      ],
+      "ignored": [],
       "provenance": {
         "component_ci_run": "https://github.com/wallentx/DroidDeck/actions/runs/38480706798",
-        "note": "Source-built DXVK with exact Direct3D BC format validation; provenance members are excluded from APK assembly.",
+        "note": "Source-built DXVK with exact Direct3D BC format validation; license, source and build provenance are retained in the downloadable component.",
         "producer_commit": "202d551c6eef2158d6f448d98f495807e5a4db44",
         "upstream_release": "https://github.com/doitsujin/dxvk/releases/tag/v2.6.2",
         "upstream_source_commit": "9d6f54a1ade20d1d27dd421024717a636f3d8c68"
@@ -681,6 +752,7 @@
         }
       ],
       "format": "zip",
+      "id": "dxvk-mali",
       "ignored": [],
       "provenance": {
         "ci_run": "https://github.com/wallentx/DroidDeck/actions/runs/38376448398",

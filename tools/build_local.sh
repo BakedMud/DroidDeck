@@ -350,7 +350,6 @@ else
 fi
 
 cd "${repo_root}"
-python3 tools/powervr/fetch.py
 python3 tools/quest/build-driver.py "${NDK}"
 comet_out="${linuxfs_dir}/usr/local/lib/droiddeck-comet"
 comet_key=$(inputs_hash "${image_id}" tools/comet)

@@ -1,6 +1,7 @@
 package com.droiddeck.launcher.update
 
 import com.droiddeck.launcher.BuildConfig
+import com.droiddeck.launcher.artifact.RepositorySources
 import com.droiddeck.launcher.update.AppUpdates.Channel
 import com.droiddeck.launcher.update.AppUpdates.Follow
 import com.droiddeck.launcher.update.AppUpdates.Installed
@@ -17,6 +18,7 @@ import org.junit.Assert.fail
 import org.junit.Test
 import org.junit.runner.RunWith
 import org.robolectric.RobolectricTestRunner
+import org.robolectric.RuntimeEnvironment
 import java.io.IOException
 
 @RunWith(RobolectricTestRunner::class)
@@ -284,5 +286,38 @@ class AppUpdatesTest {
             fail("wrong signer should be rejected")
         } catch (_: IOException) {
         }
+    }
+
+    @Test
+    fun customCatalogIsBoundToTheSelectedRepositoryAndCarriesItsSource() {
+        val raw = publishedCatalog("0".repeat(64))
+            .put("sourceRepo", "wallentx/DroidDeck")
+            .put("ciRepo", "wallentx/DroidDeck-CI")
+        raw.getJSONObject("preview").getJSONObject("apks").getJSONObject("com.droiddeck.launcher")
+            .put("url", "https://github.com/wallentx/DroidDeck-CI/releases/download/main-deadbee/DroidDeck-main-deadbee.apk")
+        val parsed = AppUpdates.readPublishedCatalog(
+            raw, "com.droiddeck.launcher", 123L,
+            expectedSourceRepo = null,
+            expectedCiRepo = "wallentx/DroidDeck-CI",
+            sourceId = "source-1",
+        )
+        assertEquals("source-1", parsed.sourceId)
+        assertEquals("0".repeat(64), parsed.preview!!.apk!!.signerSha256)
+    }
+
+    @Test
+    fun legacyOfficialCacheCannotBecomeACustomSourcesCatalog() {
+        val context = RuntimeEnvironment.getApplication()
+        val official = AppUpdates.sources(context).single()
+        val custom = RepositorySources.source("wallentx/droiddeck-ci")
+        AppUpdates.saveSources(context, listOf(official.copy(hidden = true), custom))
+        context.getSharedPreferences("app_updates", 0).edit()
+            .putString("catalog", AppUpdates.writeCatalog(catalog).toString())
+            .commit()
+        assertNull(AppUpdates.cached(context, custom.id))
+        AppUpdates.saveSources(context, AppUpdates.sources(context).map {
+            if (it.id == official.id) it.copy(hidden = false) else it
+        })
+        assertNotNull(AppUpdates.cached(context, official.id))
     }
 }

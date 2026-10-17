@@ -3,6 +3,7 @@ package com.droiddeck.launcher.session
 import com.droiddeck.launcher.gpu.LinuxVulkanDriver
 import com.droiddeck.launcher.gpu.LinuxVulkanDriverManager
 import com.droiddeck.launcher.gpu.SystemVulkanDriver
+import com.droiddeck.launcher.gpu.SystemVulkanComponentStore
 
 import android.app.Notification
 import android.app.NotificationChannel
@@ -103,6 +104,7 @@ class SessionService : Service() {
         }
     }
     @Volatile private var sessionGen = 0
+    @Volatile private var systemVulkanSnapshot: SystemVulkanComponentStore.Snapshot? = null
 
     override fun onCreate() {
         super.onCreate()
@@ -248,6 +250,7 @@ class SessionService : Service() {
         SessionEvents.transition(SessionPhase.STARTING_GUEST, "service.started", mapOf("mode" to SessionState.mode))
         com.droiddeck.launcher.wayland.CompositorHost.newSession()
         val gen = ++sessionGen
+        SessionState.generation = gen
         cancelQueuedSteamGame(clearMailbox = false)
         clearSteamGameMailbox()
         acquireLocks()
@@ -292,6 +295,7 @@ class SessionService : Service() {
 
 
     private fun runSession(gen: Int) {
+        systemVulkanSnapshot = null
         SessionPrefs.ensureSystemVulkanAutoDrivers(this)
         SessionTerminal.clear()
         com.droiddeck.launcher.gpu.TpUbwcHint.forThisDevice()
@@ -309,7 +313,7 @@ class SessionService : Service() {
         killStragglers()
         try {
             if (SystemVulkanDriver.usesDefault(SessionPrefs.linuxDriver(this))) {
-                SystemVulkanDriver.prepare(this, !OrphanReaper.hasOtherProcesses())
+                systemVulkanSnapshot = SystemVulkanDriver.prepareSnapshot(this, !OrphanReaper.hasOtherProcesses())
                 pruneSystemVulkanRuntime()
             }
             SessionFiles.stage(this, root)
@@ -557,7 +561,10 @@ class SessionService : Service() {
         LinuxRuntime.vulkanIcd(this)?.let { guest.add("VK_ICD_FILENAMES=" + it.path) }
         val linuxDriverId = SessionPrefs.linuxDriver(this)
         if (SystemVulkanDriver.usesDefault(linuxDriverId)) {
-            SystemVulkanDriver.addEnvironment(this, guest)
+            val snapshot = systemVulkanSnapshot
+                ?: throw IllegalStateException("System Vulkan session snapshot is unavailable")
+            SystemVulkanDriver.addEnvironment(snapshot, guest)
+            SystemVulkanComponentStore.launchStarting(this, snapshot, SessionState.generation)
         }
         SessionState.runtimeDriver = linuxDriverId
         com.droiddeck.launcher.gpu.AutoDriverTrial.sessionStarting(
@@ -566,7 +573,11 @@ class SessionService : Service() {
                 ?: SessionPrefs.androidDriver(this),
             linuxDriverId,
         )
-        LinuxVulkanDriver.resolveIcdPath(this, linuxDriverId)
+        (if (SystemVulkanDriver.usesDefault(linuxDriverId)) {
+            SystemVulkanDriver.icdPath(
+                systemVulkanSnapshot ?: throw IllegalStateException("System Vulkan session snapshot is unavailable"),
+            )
+        } else LinuxVulkanDriver.resolveIcdPath(this, linuxDriverId))
             ?.let { guest.add(LinuxVulkanDriver.ENV + "=" + it) }
         tuDebug(linuxDriverId)?.let { guest.add("TU_DEBUG=$it") }
         com.droiddeck.launcher.gpu.TpUbwcHint.forThisDevice()?.let { guest.add("${com.droiddeck.launcher.gpu.TpUbwcHint.ENV}=$it") }
@@ -1361,6 +1372,7 @@ class SessionService : Service() {
         xrActivityVisible = false
         updateDownloadMonitoring()
         val stoppedGen = sessionGen
+        val stoppedSystemVulkanSnapshot = systemVulkanSnapshot
         val stoppedSession = SessionState.sessionId
         SessionState.stopRequested = false
         SessionEvents.record("guest.exited", mapOf("status" to status))
@@ -1402,12 +1414,20 @@ class SessionService : Service() {
                     if (prootPid > 1) teardown(prootPid)
                     killGuestLeftovers()
                     pruneSystemVulkanRuntime()
+                    SystemVulkanComponentStore.sessionStopped(stoppedGen)
+                    if (shouldClearSystemVulkanSnapshot(stoppedGen, sessionGen, stoppedSystemVulkanSnapshot, systemVulkanSnapshot)) {
+                        systemVulkanSnapshot = null
+                    }
                     finishSessionStop(status, stoppedGen)
                 }, "session-teardown").start()
             } else {
                 Thread({
                     com.droiddeck.launcher.stores.gog.GogComet.end(stoppedSession)
                     pruneSystemVulkanRuntime()
+                    SystemVulkanComponentStore.sessionStopped(stoppedGen)
+                    if (shouldClearSystemVulkanSnapshot(stoppedGen, sessionGen, stoppedSystemVulkanSnapshot, systemVulkanSnapshot)) {
+                        systemVulkanSnapshot = null
+                    }
                     finishSessionStop(status, stoppedGen)
                 }, "session-stop-finalize").start()
             }
@@ -1735,3 +1755,10 @@ class SessionService : Service() {
         }
     }
 }
+
+internal fun shouldClearSystemVulkanSnapshot(
+    stoppedGeneration: Int,
+    currentGeneration: Int,
+    stopped: SystemVulkanComponentStore.Snapshot?,
+    current: SystemVulkanComponentStore.Snapshot?,
+): Boolean = stoppedGeneration == currentGeneration && stopped === current
