@@ -8,13 +8,19 @@ from zipfile import ZipFile
 
 OVERLAY = Path(__file__).resolve().parents[1] / 'linuxfs/overlay'
 SESSION_FILES = OVERLAY.parents[2] / 'app/src/main/java/com/droiddeck/launcher/session/SessionFiles.kt'
+HELPER_DESTINATIONS = {
+    'usr/local/bin/droiddeck-steam-taskset': 'usr/local/libexec/droiddeck-steam/taskset',
+}
 
 
 def check_extraction(overlay, source):
-    deployed = set(re.findall(r'"(usr/local/bin/droiddeck-[^"]+)"\s+to\s+"\1"', source))
-    return ['not extracted at session start: ' + path.relative_to(overlay).as_posix()
-            for path in sorted((overlay / 'usr/local/bin').glob('droiddeck-*'))
-            if path.relative_to(overlay).as_posix() not in deployed]
+    deployed = set(re.findall(r'"(usr/local/bin/droiddeck-[^"]+)"\s+to\s+"([^"]+)"', source))
+    errors = []
+    for path in sorted((overlay / 'usr/local/bin').glob('droiddeck-*')):
+        relative = path.relative_to(overlay).as_posix()
+        if (relative, HELPER_DESTINATIONS.get(relative, relative)) not in deployed:
+            errors.append('not extracted at session start: ' + relative)
+    return errors
 
 
 def source_assets(overlay=OVERLAY):

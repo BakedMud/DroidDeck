@@ -43,3 +43,21 @@ class SessionAssetsTest(unittest.TestCase):
                          assets.check_extraction(self.overlay, ''))
         mapping = '"usr/local/bin/droiddeck-login1" to "usr/local/bin/droiddeck-login1"'
         self.assertEqual([], assets.check_extraction(self.overlay, mapping))
+
+    def test_helper_at_an_unexpected_destination_is_rejected(self):
+        mapping = '"usr/local/bin/droiddeck-login1" to "usr/local/bin/unrelated"'
+        self.assertEqual(['not extracted at session start: usr/local/bin/droiddeck-login1'],
+                         assets.check_extraction(self.overlay, mapping))
+
+    def test_steam_taskset_requires_its_private_destination(self):
+        self.helper.rename(self.helper.with_name('droiddeck-steam-taskset'))
+        source = 'usr/local/bin/droiddeck-steam-taskset'
+        target = 'usr/local/libexec/droiddeck-steam/taskset'
+        self.assertEqual([], assets.check_extraction(self.overlay, f'"{source}" to "{target}"'))
+        for destination in (source, 'usr/local/libexec/unrelated/taskset'):
+            with self.subTest(destination=destination):
+                self.assertEqual(['not extracted at session start: ' + source],
+                                 assets.check_extraction(self.overlay, f'"{source}" to "{destination}"'))
+
+    def test_current_session_stages_all_bundled_helpers(self):
+        self.assertEqual([], assets.check_extraction(assets.OVERLAY, assets.SESSION_FILES.read_text()))
