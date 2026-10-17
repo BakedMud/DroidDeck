@@ -79,7 +79,11 @@ class ComponentsPageProfileTest {
                 )
             }
         }
-        compose.runOnIdle { inputModeManager.requestInputMode(InputMode.Keyboard) }
+        compose.runOnIdle {
+            inputModeManager.requestInputMode(InputMode.Keyboard)
+            first.requestFocus()
+        }
+        compose.onNodeWithText(context.getString(R.string.gpu_mode_mix)).assertIsFocused()
 
         fun pressA() {
             compose.runOnIdle {
@@ -92,6 +96,8 @@ class ComponentsPageProfileTest {
             }
         }
         fun select(label: String) {
+            // The panel redirects group entry to its selected mode.
+            compose.runOnIdle { first.requestFocus() }
             compose.onNodeWithText(label).performScrollTo()
                 .performSemanticsAction(SemanticsActions.RequestFocus) { it() }
                 .assertIsFocused()
