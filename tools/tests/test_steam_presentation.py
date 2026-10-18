@@ -18,7 +18,7 @@ GRAPHICS_KEYS = ("BL_STEAM_CEF_SOFTWARE", "BL_STEAM_GL_PRESENT", "DISABLE_GAMESC
 
 
 class SteamPresentationTest(unittest.TestCase):
-    def launch(self, enabled=None, inherited=None, with_wsi=True):
+    def launch(self, enabled=None, inherited=None, with_wsi=True, client_arch="arm64"):
         source = SESSION.read_text()
         graphics_start = source.index('bl_system_runtime=${DROIDDECK_SYSTEM_VULKAN_RUNTIME:')
         graphics_end = source.index("# gamescope's reaper", graphics_start)
@@ -33,7 +33,7 @@ class SteamPresentationTest(unittest.TestCase):
         script = (source[graphics_start:graphics_end] + "\n" + source[begin:end] + "\n" +
                   source[cef_begin:cef_end] + "\n" +
                   source[override_begin:override_end] + "\n" +
-                  '\n_bl_cdp=(); _bl_lang=()\n'
+                  '\n_bl_cdp=(); _bl_lang=(); steam_client=("$TEST_STEAM_CLIENT")\n'
                   + source[command:command_end])
         env = dict(os.environ)
         for key in GRAPHICS_KEYS + ("BL_STEAM_WSI_LAYER_PATH", "BL_STEAM_GL_WSI_ACTIVE", "BL_DESKTOP", "BL_STEAM_UI"):
@@ -49,7 +49,7 @@ class SteamPresentationTest(unittest.TestCase):
                 (wsi / "VkLayer_window_system_integration.json").write_text("{}")
                 env["BL_STEAM_WSI_LAYER_PATH"] = str(wsi)
                 env["DROIDDECK_HYBRIS_LAYERS"] = "VK_LAYER_HYBRIS_compat"
-            program = Path(tmp) / "steamrtarm64/steam"
+            program = Path(tmp) / ("client-x64/steam" if client_arch == "x86_64" else "steamrtarm64/steam")
             program.parent.mkdir()
             program.write_text(f"#!{sys.executable}\n" +
                                'import json, os, sys\nprint(json.dumps({"args":sys.argv[1:],'
@@ -63,15 +63,32 @@ class SteamPresentationTest(unittest.TestCase):
                                f'"graphics":{{key:os.getenv(key) for key in {GRAPHICS_KEYS!r}}},'
                                '"helper":os.getenv("BL_STEAM_WEBHELPER")}))\n')
             program.chmod(0o755)
-            env.update(steam_root=tmp, steam_channel="steamdeck_publicbeta")
+            env.update(steam_root=tmp, steam_channel="steamdeck_publicbeta",
+                       TEST_STEAM_CLIENT=str(program), steam_x64="1" if client_arch == "x86_64" else "0",
+                       XDG_DATA_HOME=str(Path(tmp) / "arm-data"))
             result = subprocess.run(["bash", "-c", script, "test", "steam://open/main"],
                                     env=env, capture_output=True, text=True, timeout=5)
             self.assertEqual(result.returncode, 0, result.stderr)
             launch = json.loads(result.stdout.splitlines()[-1])
             launch["log"] = result.stdout.splitlines()[:-1]
             launch["fixture_root"] = tmp
-            self.assertEqual(launch["helper"], str(Path(tmp) / "steamrtarm64/steamwebhelper"))
+            helper_root = Path(tmp) / "arm-data/Steam" if client_arch == "x86_64" else Path(tmp)
+            self.assertEqual(launch["helper"], str(helper_root / "steamrtarm64/steamwebhelper"))
             return launch
+
+    def test_x64_client_keeps_selected_command_and_arm_helper(self):
+        result = self.launch("1", client_arch="x86_64")
+        self.assertIn("-cef-use-angle=gl", result["args"])
+        self.assertEqual(result["args"][-1], "steam://open/main")
+        self.assertTrue(result["path"].startswith("/usr/local/libexec/droiddeck-steam:"))
+        self.assertEqual(result["wsi_active"], "1")
+
+    def test_x64_client_preserves_software_webhelper_fallback(self):
+        result = self.launch("1", {"steam_cef_gpu": "0"}, client_arch="x86_64")
+        self.assertIn("-cef-disable-gpu", result["args"])
+        self.assertNotIn("-cef-force-gpu", result["args"])
+        self.assertNotIn("-cef-use-angle=gl", result["args"])
+        self.assertEqual(result["args"][-1], "steam://open/main")
 
     def test_default_keeps_vulkan(self):
         for software in (None, "0"):
