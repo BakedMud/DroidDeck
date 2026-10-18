@@ -103,8 +103,15 @@ class RepositorySourcesEditorTest {
         var visible by mutableStateOf(true)
         show("editor/leave", visible = { visible })
         open()
-        compose.runOnIdle { visible = false }
-        compose.runOnIdle { assertNull(Steps.step) }
+        compose.runOnIdle {
+            visible = false
+            Snapshot.sendApplyNotifications()
+        }
+        compose.mainClock.advanceTimeByFrame()
+        compose.runOnUiThread {
+            Snapshot.sendApplyNotifications()
+            assertNull(Steps.step)
+        }
         compose.onNodeWithText(context.getString(R.string.sources_save)).assertDoesNotExist()
     }
 
