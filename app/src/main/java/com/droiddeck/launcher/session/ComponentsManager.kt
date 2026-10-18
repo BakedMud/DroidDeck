@@ -18,6 +18,7 @@ import com.github.luben.zstd.ZstdOutputStream
 import org.apache.commons.compress.archivers.tar.TarArchiveEntry
 import org.apache.commons.compress.archivers.tar.TarArchiveInputStream
 import org.apache.commons.compress.archivers.tar.TarArchiveOutputStream
+import org.apache.commons.compress.archivers.tar.TarConstants
 import org.json.JSONArray
 import org.json.JSONObject
 import java.io.BufferedInputStream
@@ -26,7 +27,6 @@ import java.io.File
 import java.io.FileInputStream
 import java.io.FileOutputStream
 import java.io.IOException
-import java.net.URI
 
 object ComponentsManager {
     private const val TAG = "Components"
@@ -396,15 +396,22 @@ object ComponentsManager {
             TarArchiveInputStream(ZstdInputStream(BufferedInputStream(FileInputStream(it), 1 shl 16))).use(block)
         }
 
-    internal fun safeArchivePath(name: String): String {
+    internal fun safeArchivePath(name: String, isDirectory: Boolean = false): String {
         require(name.isNotEmpty() && !name.startsWith('/') && '\\' !in name && name.none(Char::isISOControl)) {
             "unsafe archive path"
         }
-        val rel = name.removePrefix("./")
+        if (isDirectory && (name == "." || name == "./")) return ""
+        val rel = name.removePrefix("./").let { if (isDirectory) it.removeSuffix("/") else it }
         require(rel.isNotEmpty() && rel.length <= 1024 && rel.split('/').all { it.isNotEmpty() && it != "." && it != ".." }) {
             "unsafe archive path $name"
         }
         return rel
+    }
+
+    private fun safeArchivePath(entry: TarArchiveEntry): String {
+        require(entry.linkFlag == TarConstants.LF_NORMAL || entry.linkFlag == TarConstants.LF_OLDNORM ||
+            entry.linkFlag == TarConstants.LF_DIR) { "unsupported archive entry ${entry.name}" }
+        return safeArchivePath(entry.name, entry.isDirectory)
     }
 
     private fun readEntry(input: TarArchiveInputStream, size: Long, limit: Long): ByteArray {
@@ -426,9 +433,8 @@ object ComponentsManager {
         while (true) {
             val e = tar.nextTarEntry ?: break
             require(++entries <= MAX_WCP_ENTRIES) { "Component archive has too many entries" }
-            val rel = safeArchivePath(e.name)
+            val rel = safeArchivePath(e)
             require(seen.add(rel)) { "duplicate archive path $rel" }
-            require(e.isDirectory || e.isFile) { "unsupported archive entry $rel" }
             if (e.isFile) {
                 require(e.size in 0..MAX_WCP_FILE_BYTES) { "archive entry is too large" }
                 expanded += e.size
@@ -466,9 +472,8 @@ object ComponentsManager {
                 while (true) {
                     val e = tar.nextTarEntry ?: break
                     require(++entries <= MAX_WCP_ENTRIES) { "Component archive has too many entries" }
-                    val rel = safeArchivePath(e.name)
+                    val rel = safeArchivePath(e)
                     require(seen.add(rel)) { "duplicate archive path $rel" }
-                    require(e.isDirectory || e.isFile) { "unsupported archive entry $rel" }
                     if (e.isDirectory || !rel.startsWith("files/")) continue
                     require(e.size in 0..MAX_WCP_FILE_BYTES) { "archive entry is too large" }
                     expanded += e.size
@@ -658,9 +663,8 @@ object ComponentsManager {
                     while (true) {
                         val e = tar.nextTarEntry ?: break
                         require(++entries <= MAX_WCP_ENTRIES) { "Component archive has too many entries" }
-                        val rel = safeArchivePath(e.name)
+                        val rel = safeArchivePath(e)
                         require(seen.add(rel)) { "duplicate archive path $rel" }
-                        require(e.isDirectory || e.isFile) { "unsupported archive entry $rel" }
                         if (e.isDirectory || !rel.startsWith("files/")) continue
                         require(e.size in 0..MAX_WCP_FILE_BYTES) { "archive entry is too large" }
                         expanded += e.size
@@ -1379,12 +1383,6 @@ object ComponentsManager {
         return info.copy(file = dest.name, source = item.repository)
     }
 
-    private fun releaseUrlMatches(repository: String, tag: String, name: String, url: String): Boolean = runCatching {
-        val expected = URI(GitHubArtifacts.releaseAssetUrl(repository, tag, name))
-        val actual = URI(url)
-        actual.scheme.equals("https", true) && actual.host.equals("github.com", true) && actual.rawQuery == null &&
-            actual.rawFragment == null && actual.rawUserInfo == null && actual.port == -1 &&
-            actual.rawPath.substringBefore("/releases/").equals(expected.rawPath.substringBefore("/releases/"), true) &&
-            actual.rawPath.substringAfter("/releases/", "") == expected.rawPath.substringAfter("/releases/", "")
-    }.getOrDefault(false)
+    private fun releaseUrlMatches(repository: String, tag: String, name: String, url: String): Boolean =
+        GitHubArtifacts.releaseAssetUrlMatches(repository, tag, name, url)
 }

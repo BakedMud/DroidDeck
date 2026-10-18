@@ -22,7 +22,7 @@ object TurnipReleases {
     class Asset(val source: String, val tag: String, val name: String, val url: String, val size: Long, val linux: Boolean, val label: String,
                 val sha256: String = "", val pair: String = "", val bundle: Boolean = false,
                 val sourceId: String = "", val repository: String = "", val repositoryId: Long = 0,
-                val releaseId: Long = 0, val assetId: Long = 0) {
+                val releaseId: Long = 0, val assetId: Long = 0, val pairKind: String = pair) {
         val id: String get() = if (sourceId.isEmpty()) name else "$sourceId:$assetId:$sha256"
     }
     class Check(val assets: List<Asset>, val latest: List<Pair<String, String>>, val failed: List<String>, val checkedAt: Long,
@@ -106,7 +106,7 @@ object TurnipReleases {
                         if (!seen.add(if (kind.bundle) pair else "$linux|$label")) continue
                         assets.put(JSONObject().put("source", if (preferred != null) preferred.label else source.repository).put("tag", tag).put("name", name)
                             .put("url", a.url).put("size", a.size)
-                            .put("linux", linux).put("label", label).put("sha256", a.sha256).put("pair", pair)
+                            .put("linux", linux).put("label", label).put("sha256", a.sha256).put("pair", pair).put("pairKind", kind.pair)
                             .put("bundle", kind.bundle).put("sourceId", source.id).put("repository", source.repository)
                             .put("repositoryId", source.repositoryId).put("releaseId", r.id).put("assetId", a.id))
                     }
@@ -141,7 +141,7 @@ object TurnipReleases {
 
     private fun encode(a: Asset): JSONObject = JSONObject().put("source", a.source).put("tag", a.tag)
         .put("name", a.name).put("url", a.url).put("size", a.size).put("linux", a.linux)
-        .put("label", a.label).put("sha256", a.sha256).put("pair", a.pair).put("bundle", a.bundle)
+        .put("label", a.label).put("sha256", a.sha256).put("pair", a.pair).put("pairKind", a.pairKind).put("bundle", a.bundle)
         .put("sourceId", a.sourceId).put("repository", a.repository).put("repositoryId", a.repositoryId)
         .put("releaseId", a.releaseId).put("assetId", a.assetId)
 
@@ -156,10 +156,18 @@ object TurnipReleases {
                 repository.takeIf { it.isNotEmpty() }?.let { RepositorySources.source(it).id }.orEmpty()
             }
             if (visible != null && (sourceId.isEmpty() || sourceId !in visible)) continue
-            out.add(Asset(a.getString("source"), a.getString("tag"), a.getString("name"), a.getString("url"),
-                a.optLong("size"), a.getBoolean("linux"), a.getString("label"), a.optString("sha256", ""), a.optString("pair", ""),
+            val tag = a.getString("tag")
+            val name = a.getString("name")
+            val pair = a.optString("pair", "")
+            val pairKind = a.optString("pairKind").ifEmpty {
+                SOURCES.firstNotNullOfOrNull { adapter ->
+                    adapter.classify(name, tag)?.pair?.takeIf { qualifiedPair(repository, sourceId, it) == pair }
+                } ?: pair.takeIf { repository in sourceBuiltIns() }.orEmpty()
+            }
+            out.add(Asset(a.getString("source"), tag, name, a.getString("url"),
+                a.optLong("size"), a.getBoolean("linux"), a.getString("label"), a.optString("sha256", ""), pair,
                 a.optBoolean("bundle", false), sourceId, repository, a.optLong("repositoryId"),
-                a.optLong("releaseId"), a.optLong("assetId")))
+                a.optLong("releaseId"), a.optLong("assetId"), pairKind))
         }
         val latest = ArrayList<Pair<String, String>>()
         val l = json.optJSONArray("latest") ?: JSONArray()

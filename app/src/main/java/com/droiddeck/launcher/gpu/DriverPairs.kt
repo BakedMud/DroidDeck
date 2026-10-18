@@ -31,7 +31,7 @@ object DriverPairs {
     private val ALL_ADRENO = setOf(Family.A6XX, Family.A7XX, Family.A7XX_LOW, Family.A8XX, Family.ADRENO_UNKNOWN)
 
     private fun describe(key: String): Pair<String, Set<Family>> = when {
-        key.startsWith(DD_TURNIP) -> "DroidDeck · DD-Turnip" to ALL_ADRENO
+        key == DD_TURNIP || key.startsWith("$DD_TURNIP:") -> "DroidDeck · DD-Turnip" to ALL_ADRENO
         else -> describeFixed(key)
     }
 
@@ -42,7 +42,7 @@ object DriverPairs {
         BANNER_ONEUI -> "Banners-Turnip · 8 Gen 2 on One UI" to setOf(Family.A7XX)
         WN_BALANCED -> "WinNative · Balanced" to ALL_ADRENO
         WN_PERFORMANCE -> "WinNative · Performance" to ALL_ADRENO
-        else -> key to ALL_ADRENO
+        else -> key to emptySet()
     }
 
     fun from(check: TurnipReleases.Check?): List<DriverPair> {
@@ -51,12 +51,14 @@ object DriverPairs {
         return assets.map { it.pair }.distinct()
             .sortedBy { key -> order.indexOf(key.substringBefore(':')).let { i -> if (i < 0) order.size else i } }
             .map { key ->
-                val (name, families) = describe(key)
                 val halves = assets.filter { it.pair == key }
+                val kind = halves.map { it.pairKind }.distinct().singleOrNull().orEmpty()
+                val (classifiedName, families) = describe(kind)
+                val name = classifiedName.ifEmpty { key }
                 halves.firstOrNull { it.bundle }?.let { return@map DriverPair(key, name, families, null, null, it) }
                 val display = halves.firstOrNull { !it.linux }
                 val linux = halves.firstOrNull { it.linux }
-                val sameRelease = !key.startsWith(BANNER) || display?.tag == linux?.tag
+                val sameRelease = !kind.startsWith(BANNER) || display?.tag == linux?.tag
                 DriverPair(key, name, families, display, if (sameRelease) linux else null)
             }
     }

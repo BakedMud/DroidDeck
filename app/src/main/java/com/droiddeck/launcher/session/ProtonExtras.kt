@@ -173,15 +173,18 @@ object ProtonExtras {
                         Regex("a^"), source.id, "manifest")
                 }
             }
-            val due = candidates.filter { tool ->
-                val at = cache.optJSONObject(tool.id)?.optLong("at", 0L) ?: 0L
-                force || (now - at) !in 0 until CHECK_EVERY_MS
+            val due = candidates.groupBy { it.sourceId }.filterValues { sourceTools ->
+                sourceTools.any { tool ->
+                    val at = cache.optJSONObject(tool.id)?.optLong("at", 0L) ?: 0L
+                    force || (now - at) !in 0 until CHECK_EVERY_MS
+                }
             }
             if (due.isEmpty() || !force && (now - lastAttempt) in 0 until RETRY_MS) return false
             lastAttempt = now
             var refreshError: Throwable? = null
-            for ((sourceId, sourceTools) in due.groupBy { it.sourceId }) {
+            for ((sourceId, sourceTools) in due) {
                 val source = visible.firstOrNull { it.id == sourceId } ?: continue
+                val generation = RepositorySources.generation(context, SOURCE_SCOPE, sourceBuiltIns())
                 val releases = runCatching {
                     GitHubArtifacts.refreshReleases(context, SOURCE_SCOPE, sourceBuiltIns(), source)
                 }.onFailure {
@@ -190,18 +193,26 @@ object ProtonExtras {
                 }.getOrNull() ?: continue
                 val bound = RepositorySources.visible(context, SOURCE_SCOPE, sourceBuiltIns())
                     .firstOrNull { it.id == sourceId } ?: continue
-                for (tool in sourceTools) {
-                    val asset = runCatching {
+                runCatching {
+                    val selections = sourceTools.associateWith { tool ->
                         if (tool.baseId == "manifest") pickManifest(context, bound, releases)
                         else pickAsset(tool, bound, releases)
-                    }.onFailure {
-                        Log.w(TAG, "release check for ${tool.id}", it)
-                        if (refreshError == null || GitHubArtifacts.isRateLimited(it)) refreshError = it
-                    }.getOrNull() ?: continue
-                    cache.put(tool.id, JSONObject().put("tag", asset.tag).put("at", now)
-                        .put("sourceId", tool.sourceId).put("baseId", tool.baseId)
-                        .put("name", asset.toolName.ifEmpty { tool.name })
-                        .put("prefix", asset.toolPrefix.ifEmpty { tool.prefix }))
+                    }
+                    RepositorySources.whileCurrent(context, SOURCE_SCOPE, sourceBuiltIns(), sourceId, generation) {
+                        for ((tool, asset) in selections) {
+                            if (asset == null) {
+                                if (bound.repository !in sourceBuiltIns()) cache.remove(tool.id)
+                                continue
+                            }
+                            cache.put(tool.id, JSONObject().put("tag", asset.tag).put("at", now)
+                                .put("sourceId", tool.sourceId).put("baseId", tool.baseId)
+                                .put("name", asset.toolName.ifEmpty { tool.name })
+                                .put("prefix", asset.toolPrefix.ifEmpty { tool.prefix }))
+                        }
+                    }
+                }.onFailure {
+                    Log.w(TAG, "release check for ${source.repository}", it)
+                    if (refreshError == null || GitHubArtifacts.isRateLimited(it)) refreshError = it
                 }
             }
             runCatching { file.writeText(cache.toString()) }
@@ -413,12 +424,19 @@ object ProtonExtras {
     ): Asset? {
         for (release in releases) {
             if (release.prerelease) continue
-            val archive = release.assets.sortedBy { it.name }.firstOrNull { tool.assetPattern.containsMatchIn(it.name) } ?: continue
+            if (source.repository !in sourceBuiltIns() && release.assets.any { it.name in MANIFEST_NAMES }) continue
+            val archive = release.assets.sortedBy { it.name }.firstOrNull { matchesAsset(tool, it.name) } ?: continue
             return Asset(release.tag, archive.name, archive.url, null, archive.size, archive.sha256,
                 source.id, source.repository, source.repositoryId ?: 0, release.id, archive.id)
         }
         return null
     }
+
+    private val MANIFEST_NAMES = setOf("droiddeck-component-proton.json", "droiddeck-proton.json")
+
+    private fun matchesAsset(tool: Tool, name: String): Boolean =
+        tool.assetPattern.containsMatchIn(name) &&
+            (tool.repo in sourceBuiltIns() || name.startsWith(tool.prefix))
 
     private fun pickManifest(
         context: Context,
@@ -427,9 +445,7 @@ object ProtonExtras {
     ): Asset? {
         for (release in releases) {
             if (release.prerelease) continue
-            val sidecar = release.assets.singleOrNull {
-                it.name == "droiddeck-component-proton.json" || it.name == "droiddeck-proton.json"
-            } ?: continue
+            val sidecar = release.assets.singleOrNull { it.name in MANIFEST_NAMES } ?: continue
             val json = JSONObject(GitHubArtifacts.readReleaseAsset(
                 context = context,
                 key = SOURCE_SCOPE, builtIns = sourceBuiltIns(), source = source,
@@ -482,7 +498,7 @@ object ProtonExtras {
             if (release.optBoolean("draft", false) || release.optBoolean("prerelease", false)) continue
             val assets = release.optJSONArray("assets") ?: continue
             val entries = (0 until assets.length()).map { assets.getJSONObject(it) }
-            val archive = entries.sortedBy { it.optString("name") }.firstOrNull { tool.assetPattern.containsMatchIn(it.optString("name")) } ?: continue
+            val archive = entries.sortedBy { it.optString("name") }.firstOrNull { matchesAsset(tool, it.optString("name")) } ?: continue
             val name = archive.optString("name")
             val stem = name.substringBefore(".tar")
             val checksum = entries.firstOrNull {

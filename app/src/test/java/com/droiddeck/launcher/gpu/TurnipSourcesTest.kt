@@ -3,6 +3,7 @@ package com.droiddeck.launcher.gpu
 import com.droiddeck.launcher.artifact.RepositorySources
 import com.droiddeck.launcher.artifact.GitHubArtifacts
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertFalse
 import org.junit.Assert.assertNotEquals
 import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
@@ -71,6 +72,85 @@ class TurnipSourcesTest {
             TurnipReleases.qualifiedPair(first.repository, first.id, "banner"),
             TurnipReleases.qualifiedPair(second.repository, second.id, "banner"),
         )
+    }
+
+    @Test
+    fun refreshedCustomA8xxPairsKeepTheirClassificationThroughCacheAndFailure() {
+        val context = RuntimeEnvironment.getApplication()
+        val source = RepositorySources.source("owner/turnip")
+        TurnipReleases.saveSources(context, TurnipReleases.sources(context).map { it.copy(hidden = true) } + source)
+        val production = GitHubArtifacts.openConnection
+        var rateLimited = false
+        try {
+            GitHubArtifacts.clearRateLimits()
+            GitHubArtifacts.openConnection = { url ->
+                val body = when (url.path) {
+                    "/repos/${source.repository}" -> JSONObject().put("id", 1).put("full_name", source.repository).toString()
+                    "/repositories/1/releases" -> JSONArray().put(JSONObject().put("id", 2).put("tag_name", "r1")
+                        .put("assets", JSONArray().apply {
+                            listOf("Turnip-r1-A8xx.zip", "Turnip-r1-A8xx-Linux.zip").forEachIndexed { index, name ->
+                                put(JSONObject().put("id", index + 3).put("name", name)
+                                    .put("browser_download_url", "https://github.com/${source.repository}/releases/download/r1/$name")
+                                    .put("size", 10).put("digest", "sha256:${"a".repeat(64)}"))
+                            }
+                        })).toString()
+                    else -> error("Unexpected URL $url")
+                }
+                object : HttpURLConnection(url) {
+                    override fun connect() {}
+                    override fun disconnect() {}
+                    override fun usingProxy() = false
+                    override fun getResponseCode() = if (rateLimited) 429 else 200
+                    override fun getInputStream() = ByteArrayInputStream(body.toByteArray())
+                }
+            }
+            val fresh = TurnipReleases.refresh(context)
+            val cached = TurnipReleases.cached(context)!!
+            rateLimited = true
+            val failed = TurnipReleases.refresh(context)
+            assertTrue(failed.rateLimited)
+            val cachedFailure = TurnipReleases.cached(context)!!
+            for (check in listOf(fresh, cached, failed, cachedFailure)) {
+                assertTrue(check.assets.all { it.pairKind == DriverPairs.BANNER_A8XX })
+                val pair = DriverPairs.from(check).single()
+                assertEquals("${DriverPairs.BANNER_A8XX}:${source.id}", pair.key)
+                assertTrue(pair.complete)
+                assertEquals(setOf(GpuInfo.Family.A8XX), pair.families)
+            }
+        } finally {
+            GitHubArtifacts.openConnection = production
+            GitHubArtifacts.clearRateLimits()
+        }
+    }
+
+    @Test
+    fun legacyCustomCacheRecoversClassificationOnlyFromMatchingAdapterIdentity() {
+        val context = RuntimeEnvironment.getApplication()
+        val source = RepositorySources.source("owner/turnip")
+        TurnipReleases.saveSources(context, TurnipReleases.sources(context).map { it.copy(hidden = true) } + source)
+        fun row(name: String, pair: String, linux: Boolean) = JSONObject()
+            .put("source", source.repository).put("repository", source.repository).put("sourceId", source.id)
+            .put("tag", "r1").put("name", name).put("url", "https://example/$name")
+            .put("size", 10).put("linux", linux).put("label", "Adreno").put("pair", pair)
+        val key = "${DriverPairs.BANNER_A8XX}:${source.id}"
+        val wrongSource = "${DriverPairs.BANNER_A8XX}:unrelated-source"
+        val wrongVariant = "${DriverPairs.BANNER}:${source.id}"
+        val assets = JSONArray()
+            .put(row("Turnip-r1-A8xx.zip", key, false))
+            .put(row("Turnip-r1-A8xx-Linux.zip", key, true))
+            .put(row("Turnip-r1-A8xx.zip", wrongSource, false))
+            .put(row("Turnip-r1-A8xx.zip", wrongVariant, false))
+            .put(row("unrecognized.zip", "dd-turnip:unrecognized:${source.id}", false))
+        context.getSharedPreferences("turnip_releases", 0).edit().putString("latest",
+            JSONObject().put("assets", assets).put("latest", JSONArray()).toString()).commit()
+
+        val pairs = DriverPairs.from(TurnipReleases.cached(context)).associateBy { it.key }
+        assertTrue(pairs.getValue(key).complete)
+        assertEquals(setOf(GpuInfo.Family.A8XX), pairs.getValue(key).families)
+        for ((pairKey, pair) in pairs) if (pairKey != key) {
+            assertTrue(pair.families.isEmpty())
+            assertFalse(pair.suits(GpuInfo("Adreno 650", 650, GpuInfo.Family.A6XX, "", false)))
+        }
     }
 
     @Test

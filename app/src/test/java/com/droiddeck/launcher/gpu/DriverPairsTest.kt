@@ -11,8 +11,9 @@ class DriverPairsTest {
     private fun gpu(model: Int, adreno: Boolean = true, oneUi: Boolean = false) =
         GpuInfo("Adreno $model", model, GpuInfo.familyOf(adreno, model), "", oneUi)
 
-    private fun asset(name: String, tag: String, linux: Boolean, pair: String) =
-        TurnipReleases.Asset("src", tag, name, "https://example/$name", 3_000_000, linux, "label", "0".repeat(64), pair)
+    private fun asset(name: String, tag: String, linux: Boolean, pair: String, pairKind: String = pair) =
+        TurnipReleases.Asset("src", tag, name, "https://example/$name", 3_000_000, linux, "label", "0".repeat(64), pair,
+            pairKind = pairKind)
 
     @Test
     fun familiesFollowTheAdrenoModel() {
@@ -128,6 +129,62 @@ class DriverPairsTest {
         assertEquals("v1.19 + v0.1.2", wn.version)
         assertTrue(wn.suits(gpu(830)))
         assertFalse(pairs.getValue(DriverPairs.BANNER).suits(gpu(830)))
+    }
+
+    @Test
+    fun sourceQualifiedPairsRetainTheirHardwareClassification() {
+        val key = "${DriverPairs.BANNER_A8XX}:github-owner-turnip"
+        val pairs = DriverPairs.from(TurnipReleases.Check(
+            listOf(
+                asset("Turnip-r4-A8xx.zip", "r4", false, key, DriverPairs.BANNER_A8XX),
+                asset("Turnip-r4-A8xx-Linux.zip", "r4", true, key, DriverPairs.BANNER_A8XX),
+                asset("Turnip-r4-A8xx.zip", "r4", false, DriverPairs.BANNER_A8XX),
+                asset("Turnip-r4-A8xx-Linux.zip", "r4", true, DriverPairs.BANNER_A8XX),
+            ), emptyList(), emptyList(), 0L,
+        )).associateBy { it.key }
+        val custom = pairs.getValue(key)
+        assertTrue(custom.complete)
+        assertTrue(custom.suits(gpu(830)))
+        assertFalse(custom.suits(gpu(650)))
+        assertFalse(custom.suits(gpu(740)))
+        assertEquals(pairs.getValue(DriverPairs.BANNER_A8XX).families, custom.families)
+        assertEquals("Banners-Turnip · Adreno 8xx", custom.name)
+    }
+
+    @Test
+    fun sourceQualifiedPairsNeverMixSourcesOrBannersReleases() {
+        val first = "${DriverPairs.BANNER_A8XX}:github-owner-one"
+        val second = "${DriverPairs.BANNER_A8XX}:github-owner-two"
+        val pairs = DriverPairs.from(TurnipReleases.Check(
+            listOf(
+                asset("Turnip-r4-A8xx.zip", "r4", false, first, DriverPairs.BANNER_A8XX),
+                asset("Turnip-r3-A8xx-Linux.zip", "r3", true, first, DriverPairs.BANNER_A8XX),
+                asset("Turnip-r4-A8xx-Linux.zip", "r4", true, second, DriverPairs.BANNER_A8XX),
+                asset("Turnip-r4-A8xx-Linux.zip", "r4", true, DriverPairs.BANNER_A8XX),
+            ), emptyList(), emptyList(), 0L,
+        )).associateBy { it.key }
+        assertEquals(3, pairs.size)
+        assertTrue(pairs.values.none { it.complete })
+        assertNull(pairs.getValue(first).linux)
+        assertNull(pairs.getValue(second).display)
+        assertNull(pairs.getValue(DriverPairs.BANNER_A8XX).display)
+    }
+
+    @Test
+    fun unknownAndConflictingClassificationsDoNotClaimCompatibility() {
+        val pairs = DriverPairs.from(TurnipReleases.Check(
+            listOf(
+                asset("Turnip-r4-unknown.zip", "r4", false, "banner-unknown:github-owner-one", "banner-unknown"),
+                asset("Turnip-r4-A8xx.zip", "r4", false, "conflict:github-owner-one", DriverPairs.BANNER_A8XX),
+                asset("Turnip-r4-Linux.zip", "r4", true, "conflict:github-owner-one", DriverPairs.BANNER),
+            ), emptyList(), emptyList(), 0L,
+        ))
+        for (pair in pairs) {
+            assertTrue(pair.families.isEmpty())
+            assertFalse(pair.suits(gpu(650)))
+            assertFalse(pair.suits(gpu(830)))
+            assertFalse(pair.suits(gpu(0)))
+        }
     }
 
     @Test

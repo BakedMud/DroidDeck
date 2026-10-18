@@ -254,8 +254,17 @@ object GitHubArtifacts {
         val repo = RepositorySources.canonicalRepository(repository)
         validateTag(tag)
         validateAssetName(name)
-        return "https://github.com/$repo/releases/download/${segment(tag)}/${segment(name)}"
+        val encodedTag = tag.split('/').joinToString("/") { segment(it) }
+        return "https://github.com/$repo/releases/download/$encodedTag/${segment(name)}"
     }
+
+    @JvmStatic fun releaseAssetUrlMatches(repository: String, tag: String, name: String, url: String): Boolean = runCatching {
+        val expected = URI(releaseAssetUrl(repository, tag, name))
+        val actual = URI(url)
+        validHttps(actual) && actual.host.equals("github.com", true) && actual.rawQuery == null &&
+            actual.rawPath.substringBefore("/releases/").equals(expected.rawPath.substringBefore("/releases/"), true) &&
+            actual.path.substringAfter("/releases/", "") == expected.path.substringAfter("/releases/", "")
+    }.getOrDefault(false)
 
     private fun resolve(
         context: Context, key: String, builtIns: List<String>, source: RepositorySources.Source,
@@ -316,17 +325,14 @@ object GitHubArtifacts {
         require(asset.id > 0 && asset.size > 0 && Regex("[0-9a-f]{64}").matches(asset.sha256)) {
             "Asset must have an identity, size, and SHA-256 digest"
         }
-        val expected = URI(releaseAssetUrl(repository, tag, asset.name))
-        val actual = URI(asset.url)
-        require(validHttps(actual) && actual.host.equals("github.com", true) && actual.rawQuery == null &&
-            actual.rawPath.substringBefore("/releases/").equals(expected.rawPath.substringBefore("/releases/"), true) &&
-            actual.rawPath.substringAfter("/releases/", "") == expected.rawPath.substringAfter("/releases/", "")) {
+        require(releaseAssetUrlMatches(repository, tag, asset.name, asset.url)) {
             "Asset URL is not bound to the configured repository, tag, and filename"
         }
     }
 
     private fun validateTag(tag: String) {
-        require(tag.isNotEmpty() && tag.length <= 256 && tag != "." && tag != ".." &&
+        require(tag.isNotEmpty() && tag.length <= 256 &&
+            tag.split('/').all { it.isNotEmpty() && it != "." && it != ".." } &&
             tag.none { it == '\\' || it.isISOControl() }) { "Invalid release tag" }
     }
 

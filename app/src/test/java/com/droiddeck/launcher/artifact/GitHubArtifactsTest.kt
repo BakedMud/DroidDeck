@@ -181,6 +181,58 @@ class GitHubArtifactsTest {
         assertTrue(runCatching { GitHubArtifacts.refreshReleases(app, key, defaults, source) }.isFailure)
     }
 
+    @Test fun slashTaggedReleaseDoesNotAbortTheOtherComponentCatalogs() {
+        assertEquals("https://github.com/example/drivers/releases/download/Proton/wine/bundle.zip",
+            GitHubArtifacts.releaseAssetUrl("Example/Drivers", "Proton/wine", "bundle.zip"))
+        for (encodedTag in listOf("Proton/wine", "Proton%2Fwine", "Proton%2fwine")) {
+            val url = "https://github.com/Example/Drivers/releases/download/$encodedTag/bundle.zip"
+            val proton = release(assetUrl = url).put("tag_name", "Proton/wine")
+            val dxvk = release(assetUrl = "https://github.com/Example/Drivers/releases/download/Dxvk-Linux/bundle.zip")
+                .put("id", 6).put("tag_name", "Dxvk-Linux")
+            GitHubArtifacts.openConnection = { request -> Response(request, body =
+                if (request.path.endsWith("/releases")) JSONArray().put(proton).put(dxvk).toString()
+                else """{"id":123,"full_name":"Example/Drivers"}""") }
+
+            val results = GitHubArtifacts.refreshReleases(app, key, defaults, source)
+            assertEquals(listOf("Proton/wine", "Dxvk-Linux"), results.map { it.tag })
+            assertEquals(url, results.first().assets.single().url)
+            assertEquals(results, GitHubArtifacts.cachedReleases(app, key, defaults, source))
+        }
+    }
+
+    @Test fun releaseUrlEncodingPreservesLiteralPlusesAndPercentEscapes() {
+        val base = "https://github.com/example/drivers/releases/download/"
+        for (url in listOf("release/v1+2/manifest+patched.json", "release%2Fv1%2B2/manifest%2bpatched.json")) {
+            assertTrue(GitHubArtifacts.releaseAssetUrlMatches("Example/Drivers", "release/v1+2", "manifest+patched.json", base + url))
+        }
+        assertFalse(GitHubArtifacts.releaseAssetUrlMatches("Example/Drivers", "release/v1+2", "manifest+patched.json",
+            base + "release/v1%202/manifest+patched.json"))
+        val literalPercent = GitHubArtifacts.releaseAssetUrl("Example/Drivers", "Proton%2Fwine", "bundle%2Fname.zip")
+        assertTrue(GitHubArtifacts.releaseAssetUrlMatches("Example/Drivers", "Proton%2Fwine", "bundle%2Fname.zip", literalPercent))
+        assertFalse(GitHubArtifacts.releaseAssetUrlMatches("Example/Drivers", "Proton%2Fwine", "bundle%2Fname.zip",
+            base + "Proton%2Fwine/bundle%2Fname.zip"))
+    }
+
+    @Test fun slashTagNormalizationStillRejectsForeignOrAmbiguousAssetIdentity() {
+        val good = "https://github.com/Example/Drivers/releases/download/Proton/wine/bundle.zip"
+        for (url in listOf(
+            good.replace("Example/Drivers", "Other/Drivers"),
+            good.replace("Proton/wine", "Proton/other"),
+            good.replace("Proton/wine", "Proton%252Fwine"),
+            good.replace("Proton/wine", "Proton/../wine"),
+            good.replace("bundle.zip", "other.zip"),
+            good.replace("bundle.zip", "folder%2Fbundle.zip"),
+            good.replace("github.com", "github.com.evil.example"),
+            good.replace("github.com", "user@github.com"),
+            good.replace("https:", "http:"),
+            "$good?download=1", "$good#fragment",
+        )) assertFalse(url, GitHubArtifacts.releaseAssetUrlMatches("Example/Drivers", "Proton/wine", "bundle.zip", url))
+
+        for (tag in listOf("Proton/../wine", "Proton/./wine", "Proton//wine", "/Proton/wine", "Proton/wine/")) {
+            assertTrue(tag, runCatching { GitHubArtifacts.releaseAssetUrl("Example/Drivers", tag, "bundle.zip") }.isFailure)
+        }
+    }
+
     @Test fun releaseQueriesUseTheBoundNumericIdentityAndRejectNameRedirects() {
         val requests = ArrayList<String>()
         GitHubArtifacts.openConnection = { url ->
