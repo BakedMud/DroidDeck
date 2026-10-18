@@ -42,6 +42,45 @@ class LogRedactorTest {
         assertEquals("login <redacted:email> ok", LogRedactor.redact("login someone@example.com ok"))
     }
 
+    @Test fun hidlSharedLibrariesStayVisibleWhileAdjacentSecretsAndEmailsAreRedacted() {
+        val library = "android.hardware.graphics.mapper@4.0.so"
+        val vendorLibrary = "vendor.qti.hardware.display.mapper@4.0.so"
+        val line = "/vendor/lib64/hw/$library loaded $vendorLibrary contact=someone@company.so token=abcdef123456"
+        val expected = "/vendor/lib64/hw/$library loaded $vendorLibrary contact=<redacted:email> token=<redacted:token>"
+
+        assertEquals(expected, LogRedactor.redact(line))
+        assertEquals(expected, LogRedactor.redactForShare(line))
+    }
+
+    @Test fun privacyRulesOverrideTheHidlSharedLibraryException() {
+        val library = "android.hardware.graphics.mapper@4.0.so"
+        assertEquals("token=<redacted:token>", LogRedactor.redact("token=$library"))
+        assertEquals("username=<redacted:account>", LogRedactor.redact("username=$library"))
+
+        val users = tmp.newFile("hidl-loginusers.vdf")
+        users.writeText("\"AccountName\" \"$library\"")
+        try {
+            LogRedactor.learnAccounts(users)
+            assertEquals("<redacted:account>", LogRedactor.redact(library))
+        } finally {
+            LogRedactor.learnAccounts()
+        }
+    }
+
+    @Test fun onlyExactHidlSharedLibraryNamesBypassEmailRedaction() {
+        val library = "android.hardware.graphics.mapper@4.0.so"
+
+        assertEquals(library, LogRedactor.redact(library))
+        assertEquals("<redacted:email>", LogRedactor.redact("$library.evil"))
+        assertEquals("<redacted:email>", LogRedactor.redact("someone@company.so"))
+        assertEquals("<redacted:email>", LogRedactor.redact("not$library"))
+        assertEquals("<redacted:email>_debug", LogRedactor.redact("${library}_debug"))
+        assertEquals("<redacted:email>.1", LogRedactor.redact("${library}.1"))
+        assertEquals("<redacted:email>@attacker", LogRedactor.redact("${library}@attacker"))
+        assertEquals("<redacted:email>", LogRedactor.redact("android.hardware.graphics.mapper@4.0.software"))
+        assertEquals("<redacted:email>", LogRedactor.redact("android.hardware.graphics.mapper@4.0.so.evil"))
+    }
+
     @Test fun clockTimeIsNotAnAddress() {
         val line = "[2026-09-27 10:03:05] Startup"
         assertEquals(line, LogRedactor.redact(line))

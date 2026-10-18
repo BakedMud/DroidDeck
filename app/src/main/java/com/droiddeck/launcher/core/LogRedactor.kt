@@ -47,7 +47,21 @@ object LogRedactor {
         out.toString()
     }
 
+    private fun matchesEntire(input: String, regex: Regex): Boolean =
+        withMatcher(regex, input) { it.matches() }
+
+    private fun isHidlSharedLibrary(input: String, match: java.util.regex.Matcher): Boolean {
+        if (!matchesEntire(match.group(), HIDL_SHARED_LIBRARY)) return false
+        fun continuesToken(char: Char) = char.isLetterOrDigit() || char in "._%+@-"
+        return (match.start() == 0 || !continuesToken(input[match.start() - 1])) &&
+            (match.end() == input.length || !continuesToken(input[match.end()]))
+    }
+
     private val EMAIL = Regex("[A-Za-z0-9._%+\\-]+@[A-Za-z0-9.\\-]+\\.[A-Za-z]{2,}")
+    private val HIDL_SHARED_LIBRARY = Regex(
+        "(?:android\\.(?:hardware|frameworks|hidl|system)|vendor\\.[A-Za-z0-9_]+\\.hardware)" +
+            "(?:\\.[A-Za-z0-9_]+)+@[0-9]+\\.[0-9]+(?:-[A-Za-z0-9_]+)*\\.so"
+    )
     private val JWT_LABELLED = Regex("(?i)(\\bJWT[\\s=:]+)(\\d{8,})")
     private val JWT_BASE64 = Regex("ey[A-Za-z0-9_\\-]{6,}\\.[A-Za-z0-9_\\-]{6,}\\.[A-Za-z0-9_\\-]{6,}")
     private val GUID = Regex("\\b[0-9A-Fa-f]{8}-[0-9A-Fa-f]{4}-[0-9A-Fa-f]{4}-[0-9A-Fa-f]{4}-[0-9A-Fa-f]{12}\\b")
@@ -345,7 +359,9 @@ object LogRedactor {
             }
             if (out.has("login")) out.set(replaceMatches(out.text, LOGIN_KV) { "${it.group(1)}${it.group(2)}${quoted(it.group(3))}" })
             for (r in accounts) if (r.needs == null || out.has(r.needs)) out.set(replaceMatches(out.text, r.regex, "<redacted:account>"))
-            if ('@' in out.text) out.set(replaceMatches(out.text, EMAIL, "<redacted:email>"))
+            if ('@' in out.text) out.set(replaceMatches(out.text, EMAIL) { m ->
+                m.group().takeIf { isHidlSharedLibrary(out.text, m) } ?: "<redacted:email>"
+            })
             if (out.has("jwt", "token", "ticket", "sessionid", "steamloginsecure", "machineauth")) {
                 out.set(replaceMatches(out.text, RESIDUAL) { "${it.group(1)}=<redacted:token>" })
             }
