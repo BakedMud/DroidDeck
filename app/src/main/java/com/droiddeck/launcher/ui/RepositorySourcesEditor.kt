@@ -78,7 +78,7 @@ internal fun RepositorySourcesButton(
     val colors = MaterialTheme.colorScheme
     val palette = LocalPalette.current
     var menuOpen by remember(scopeKey) { mutableStateOf(false) }
-    var anchor by remember { mutableStateOf<Rect?>(null) }
+    val anchor = remember { arrayOfNulls<Rect>(1) }
     var menu by remember(scopeKey) { mutableStateOf<StepAsk?>(null) }
     var loading by remember(scopeKey) { mutableStateOf(false) }
     var loaded by remember(scopeKey) { mutableStateOf(false) }
@@ -229,12 +229,12 @@ internal fun RepositorySourcesButton(
             modifier = Modifier.fillMaxWidth().stepItem(1).padding(horizontal = 10.dp, vertical = 6.dp),
         )
     }
-    Box(Modifier.onGloballyPositioned { anchor = it.boundsInRoot() }) {
+    Box(Modifier.onGloballyPositioned { anchor[0] = it.boundsInRoot() }) {
         ToolIcon(Icons.Outlined.CallSplit, title, enabled = enabled && scopeKey.isNotBlank()) {
             if (menu != null && Steps.step === menu) {
                 Steps.fold()
             } else {
-                val from = anchor ?: return@ToolIcon
+                val from = anchor[0] ?: return@ToolIcon
                 menuOpen = true
                 loading = true
                 loaded = false

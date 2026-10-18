@@ -7,6 +7,7 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.setValue
+import androidx.compose.runtime.snapshots.Snapshot
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.geometry.Offset
@@ -56,6 +57,7 @@ class RepositorySourcesEditorTest {
         visible: () -> Boolean = { true },
         onSaved: () -> Unit = {},
     ) {
+        Snapshot.sendApplyNotifications()
         compose.setContent {
             DroidDeckTheme {
                 Box(Modifier.fillMaxSize()) {
