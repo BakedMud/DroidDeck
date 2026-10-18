@@ -57,7 +57,9 @@ object TurnipReleases {
         },
         Adapter("DroidDeck", "droid-deck/drivers-ci") { name, tag ->
             if (!Regex("""^DD-Turnip-v\d+\.\d+\.\d+\.zip$""").matches(name)) return@Adapter null
-            Kind(false, "Android + Linux · all Adreno", DriverPairs.ddTurnip(tag), bundle = true)
+            val pair = DriverPairs.ddTurnip(tag)
+            if (DriverPairs.ddTurnipVersion(pair) == null) return@Adapter null
+            Kind(false, "Android + Linux · all Adreno", pair, bundle = true)
         },
     )
 

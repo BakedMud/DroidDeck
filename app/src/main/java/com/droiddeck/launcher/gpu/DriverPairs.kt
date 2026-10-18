@@ -12,6 +12,26 @@ object DriverPairs {
     const val DD_TURNIP = "dd-turnip"
     fun ddTurnip(tag: String) = "$DD_TURNIP:$tag"
 
+    internal data class DdTurnipVersion(val major: Long, val minor: Long, val patch: Long) : Comparable<DdTurnipVersion> {
+        override fun compareTo(other: DdTurnipVersion): Int {
+            major.compareTo(other.major).takeIf { it != 0 }?.let { return it }
+            minor.compareTo(other.minor).takeIf { it != 0 }?.let { return it }
+            return patch.compareTo(other.patch)
+        }
+    }
+
+    private val DD_TURNIP_VERSION = Regex("""(\d+)\.(\d+)\.(\d+)$""")
+
+    internal fun ddTurnipVersion(pairKind: String): DdTurnipVersion? {
+        val match = DD_TURNIP_VERSION.find(pairKind) ?: return null
+        val (major, minor, patch) = match.destructured
+        return DdTurnipVersion(
+            major.toLongOrNull() ?: return null,
+            minor.toLongOrNull() ?: return null,
+            patch.toLongOrNull() ?: return null,
+        )
+    }
+
     class DriverPair(
         val key: String,
         val name: String,
@@ -74,8 +94,9 @@ object DriverPairs {
 
     fun newestDdTurnip(pairs: List<DriverPair>): String? = pairs
         .filter { it.key.startsWith("$DD_TURNIP:") && it.complete }
-        .maxByOrNull { p ->
-            Regex("""(\d+)\.(\d+)\.(\d+)$""").find(p.assets.firstOrNull()?.pairKind ?: p.key)?.destructured
-                ?.let { (major, minor, patch) -> major.toLong() * 1_000_000_000_000 + minor.toLong() * 1_000_000 + patch.toLong() } ?: -1L
-        }?.key
+        .mapNotNull { pair ->
+            ddTurnipVersion(pair.assets.firstOrNull()?.pairKind ?: pair.key)?.let { pair to it }
+        }
+        .maxWithOrNull { first, second -> first.second.compareTo(second.second) }
+        ?.first?.key
 }

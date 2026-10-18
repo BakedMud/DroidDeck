@@ -242,4 +242,29 @@ class DriverPairsTest {
             DriverPairs.recommendedKey(gpu(840), pairs),
         )
     }
+
+    @Test
+    fun adreno840IgnoresDdTurnipWithAnOversizedVersionComponent() {
+        fun bundle(tag: String) = TurnipReleases.Asset(
+            "DroidDeck", tag, "$tag.zip", "https://example/$tag", 6_000_000, false,
+            "Android + Linux", "0".repeat(64), DriverPairs.ddTurnip(tag), bundle = true,
+        )
+        val valid = bundle("DD-Turnip-v2.0.0")
+        val oversized = bundle("DD-Turnip-v9223372036854775808.0.0")
+        val pairs = DriverPairs.from(TurnipReleases.Check(listOf(oversized, valid), emptyList(), emptyList(), 0L))
+        assertNull(DriverPairs.ddTurnipVersion(oversized.pairKind))
+        assertEquals(valid.pair, DriverPairs.recommendedKey(gpu(840), pairs))
+    }
+
+    @Test
+    fun adreno840ComparesLargeDdTurnipVersionsWithoutPackingOverflow() {
+        fun bundle(tag: String) = TurnipReleases.Asset(
+            "DroidDeck", tag, "$tag.zip", "https://example/$tag", 6_000_000, false,
+            "Android + Linux", "0".repeat(64), DriverPairs.ddTurnip(tag), bundle = true,
+        )
+        val newer = bundle("DD-Turnip-v9223373.0.0")
+        val older = bundle("DD-Turnip-v1.999999.999999")
+        val pairs = DriverPairs.from(TurnipReleases.Check(listOf(older, newer), emptyList(), emptyList(), 0L))
+        assertEquals(newer.pair, DriverPairs.recommendedKey(gpu(840), pairs))
+    }
 }

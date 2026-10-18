@@ -75,6 +75,41 @@ class TurnipSourcesTest {
     }
 
     @Test
+    fun configuredSourceDoesNotAcceptAnOversizedDdTurnipVersion() {
+        val context = RuntimeEnvironment.getApplication()
+        val source = RepositorySources.source("owner/turnip")
+        TurnipReleases.saveSources(context, TurnipReleases.sources(context).map { it.copy(hidden = true) } + source)
+        val tag = "DD-Turnip-v9223372036854775808.0.0"
+        val name = "$tag.zip"
+        val production = GitHubArtifacts.openConnection
+        try {
+            GitHubArtifacts.openConnection = { url ->
+                val body = when (url.path) {
+                    "/repos/${source.repository}" -> JSONObject().put("id", 1).put("full_name", source.repository).toString()
+                    "/repositories/1/releases" -> JSONArray().put(JSONObject().put("id", 2).put("tag_name", tag)
+                        .put("assets", JSONArray().put(JSONObject().put("id", 3).put("name", name)
+                            .put("browser_download_url", GitHubArtifacts.releaseAssetUrl(source.repository, tag, name))
+                            .put("size", 10).put("digest", "sha256:${"a".repeat(64)}")))).toString()
+                    else -> error("Unexpected URL $url")
+                }
+                object : HttpURLConnection(url) {
+                    override fun connect() {}
+                    override fun disconnect() {}
+                    override fun usingProxy() = false
+                    override fun getResponseCode() = 200
+                    override fun getInputStream() = ByteArrayInputStream(body.toByteArray())
+                }
+            }
+            val check = TurnipReleases.refresh(context)
+            assertTrue(check.assets.isEmpty())
+            assertTrue(TurnipReleases.cached(context)!!.assets.isEmpty())
+        } finally {
+            GitHubArtifacts.openConnection = production
+            GitHubArtifacts.clearRateLimits()
+        }
+    }
+
+    @Test
     fun refreshedCustomA8xxPairsKeepTheirClassificationThroughCacheAndFailure() {
         val context = RuntimeEnvironment.getApplication()
         val source = RepositorySources.source("owner/turnip")
