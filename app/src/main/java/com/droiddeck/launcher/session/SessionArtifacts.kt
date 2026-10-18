@@ -274,7 +274,8 @@ object SessionArtifacts {
     }
 
     @Synchronized
-    fun finishAbandoned(context: Context) {
+    fun finishAbandoned(context: Context, beforeGuestStart: Boolean = false) {
+        val stopWhenSessionStarts = !beforeGuestStart
         val parent = LinuxRuntime.logDir(context)
         val abandoned = parent.listFiles { f ->
             SessionPaths.isSessionFolder(f) && !File(f, COMPLETE_MARKER).exists() && !inFlight(f)
@@ -284,7 +285,7 @@ object SessionArtifacts {
         val latestSession = SessionPaths.sessionFolders(context).lastOrNull()
         LogRedactor.learnFromRuntime(LinuxRuntime.rootDir(context))
         for (dir in abandoned) {
-            if (SessionState.running) break
+            if (stopWhenSessionStarts && SessionState.running) break
             if (dir == current) continue
             val newest = dir == latestSession
             try {
@@ -309,25 +310,27 @@ object SessionArtifacts {
                         dir,
                         record,
                         steamArch = recordedClient(dir),
-                        stopWhenSessionStarts = true,
+                        stopWhenSessionStarts = stopWhenSessionStarts,
                     )
-                    if (!record.deferred && !SessionState.running) VacDiagnostics.collect(context, dir)
+                    if (!record.deferred && (!stopWhenSessionStarts || !SessionState.running)) {
+                        VacDiagnostics.collect(context, dir)
+                    }
                 }
-                if (record.deferred || SessionState.running) {
+                if (record.deferred || stopWhenSessionStarts && SessionState.running) {
                     record.failed = true
                     record.deferred = true
                     markScrubbed(record)
                     break
                 }
                 SessionLogCapture.dumpCrashBuffer(File(dir, "crash.log"))
-                if (SessionState.running) {
+                if (stopWhenSessionStarts && SessionState.running) {
                     record.failed = true
                     record.deferred = true
                     markScrubbed(record)
                     break
                 }
                 SessionEvents.record("session.artifacts_recovered", mapOf("newest" to newest), dir)
-                val scrubbed = scrubTree(record, stopWhenSessionStarts = true)
+                val scrubbed = scrubTree(record, stopWhenSessionStarts = stopWhenSessionStarts)
                 markScrubbed(scrubbed)
                 if (scrubbed.deferred) break
                 File(dir, COMPLETE_MARKER).writeText("collected: late, at next app start, ${now()}\n")

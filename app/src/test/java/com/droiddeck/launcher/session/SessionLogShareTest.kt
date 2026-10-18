@@ -212,4 +212,43 @@ class SessionLogShareTest {
         assertEquals("session A\n", saved.readText())
         assertTrue(File(folder, SessionArtifacts.COMPLETE_MARKER).isFile)
     }
+
+    @Test fun startupRecoveryRunsBeforeVacMarkerArmWhileOrdinaryCleanupDefers() {
+        val context: android.content.Context = RuntimeEnvironment.getApplication()
+        val root = com.droiddeck.launcher.runtime.LinuxRuntime.rootDir(context)
+        val folder = File(com.droiddeck.launcher.runtime.LinuxRuntime.logDir(context), "2999-12-31-99-startup-recovery")
+        val marker = File(root, "root/.droiddeck-vac-diagnostics")
+        val launches = File(root, "root/.droiddeck-vac-launches")
+        val runtimeSteamLog = File(SessionPrefs.steamRoot(context, "arm64"), "logs/startup-recovery-vac.log")
+        val previousRunning = SessionState.running
+        val previousPhase = SessionState.phase
+        try {
+            folder.deleteRecursively()
+            folder.mkdirs()
+            SessionArtifacts.recordClient(folder, "arm64")
+            marker.apply { parentFile!!.mkdirs(); writeText("0\narm64\n") }
+            launches.writeText("startup VAC evidence\n")
+            runtimeSteamLog.apply { parentFile!!.mkdirs(); writeText("startup VAC evidence\n") }
+            SessionState.running = true
+            SessionState.phase = SessionPhase.STARTING_GUEST
+
+            SessionArtifacts.finishAbandoned(context)
+
+            assertFalse(File(folder, "ended-without-teardown.txt").exists())
+            assertFalse(File(folder, SessionArtifacts.COMPLETE_MARKER).exists())
+
+            SessionArtifacts.finishAbandoned(context, beforeGuestStart = true)
+
+            assertEquals("startup VAC evidence\n", File(folder, "steam/startup-recovery-vac.log").readText())
+            assertTrue(File(folder, "vac.txt").readText().contains("startup VAC evidence"))
+            assertTrue(File(folder, SessionArtifacts.COMPLETE_MARKER).isFile)
+        } finally {
+            SessionState.running = previousRunning
+            SessionState.phase = previousPhase
+            folder.deleteRecursively()
+            runtimeSteamLog.delete()
+            marker.delete()
+            launches.delete()
+        }
+    }
 }
