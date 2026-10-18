@@ -179,7 +179,7 @@ object ProtonExtras {
             val due = candidates.groupBy { it.sourceId }.filterValues { sourceTools ->
                 val sourceId = sourceTools.first().sourceId
                 val checkedAt = sourceChecks.optLong(sourceId, 0L).takeIf { it > 0L }
-                    ?: sourceTools.maxOfOrNull { cache.optJSONObject(it.id)?.optLong("at", 0L) ?: 0L }
+                    ?: sourceTools.minOfOrNull { cache.optJSONObject(it.id)?.optLong("at", 0L) ?: 0L }
                     ?: 0L
                 force || (now - checkedAt) !in 0 until CHECK_EVERY_MS
             }

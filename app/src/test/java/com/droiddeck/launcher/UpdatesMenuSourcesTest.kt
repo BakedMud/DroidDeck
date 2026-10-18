@@ -5,6 +5,7 @@ import android.os.Handler
 import android.os.Looper
 import com.droiddeck.launcher.artifact.GitHubArtifacts
 import com.droiddeck.launcher.update.AppUpdates
+import com.droiddeck.launcher.update.SelfInstaller
 import org.junit.After
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
@@ -35,6 +36,9 @@ class UpdatesMenuSourcesTest {
     fun setUp() {
         GitHubArtifacts.clearRateLimits()
         activity = Robolectric.buildActivity(Activity::class.java).setup().get()
+        AppUpdates.applyInstalledSignerIdentity(
+            SelfInstaller.VerifiedIdentity(setOf(BuildConfig.RELEASE_SIGNER), emptySet()), true,
+        )
         menu = UpdatesMenu(activity, Handler(Looper.getMainLooper()))
         menu.start()
     }
@@ -44,6 +48,7 @@ class UpdatesMenuSourcesTest {
         menu.unregister()
         GitHubArtifacts.openConnection = productionConnection
         GitHubArtifacts.clearRateLimits()
+        AppUpdates.applyInstalledSignerIdentity(SelfInstaller.VerifiedIdentity(emptySet(), emptySet()), false)
     }
 
     @Test
