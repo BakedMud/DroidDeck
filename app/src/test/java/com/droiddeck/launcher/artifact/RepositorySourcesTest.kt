@@ -1,6 +1,10 @@
 package com.droiddeck.launcher.artifact
 
 import java.io.File
+import java.util.concurrent.ConcurrentLinkedQueue
+import java.util.concurrent.CountDownLatch
+import java.util.concurrent.TimeUnit
+import kotlin.concurrent.thread
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertTrue
@@ -115,5 +119,37 @@ class RepositorySourcesTest {
         val rows = RepositorySources.initialize(app, key, defaults, initial)
         assertEquals(1, rows.size)
         assertTrue(rows.single().hidden)
+    }
+
+    @Test fun guardedWritesExcludePolicyChangesUntilTheyFinish() {
+        val source = RepositorySources.list(app, key, defaults).single()
+        val generation = RepositorySources.generation(app, key, defaults)
+        val entered = CountDownLatch(1)
+        val release = CountDownLatch(1)
+        val saved = CountDownLatch(1)
+        val errors = ConcurrentLinkedQueue<Throwable>()
+        val writer = thread {
+            runCatching {
+                RepositorySources.whileCurrent(app, key, defaults, source.id, generation) {
+                    entered.countDown()
+                    check(release.await(2, TimeUnit.SECONDS))
+                }
+            }.onFailure { errors.add(it) }
+        }
+        assertTrue(entered.await(2, TimeUnit.SECONDS))
+        val policy = thread {
+            runCatching {
+                RepositorySources.save(app, key, defaults, listOf(source.copy(hidden = true)))
+            }.onFailure { errors.add(it) }
+            saved.countDown()
+        }
+        assertFalse(saved.await(150, TimeUnit.MILLISECONDS))
+        release.countDown()
+        writer.join(2_000)
+        policy.join(2_000)
+        assertFalse(writer.isAlive)
+        assertFalse(policy.isAlive)
+        assertTrue(errors.toString(), errors.isEmpty())
+        assertTrue(RepositorySources.visible(app, key, defaults).isEmpty())
     }
 }

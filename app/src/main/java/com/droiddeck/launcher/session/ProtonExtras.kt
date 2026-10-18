@@ -19,6 +19,7 @@ object ProtonExtras {
     private const val NEED_BYTES = 4L * 1024 * 1024 * 1024
     const val SOURCE_SCOPE = "proton"
     const val CHECK_EVERY_MS = 6L * 60 * 60 * 1000
+    private const val SOURCE_CHECKS = "_sources"
     @Volatile
     var installInProgress = false
         private set
@@ -56,6 +57,7 @@ object ProtonExtras {
         }
         val cache = readJson(latestFile(context))
         val custom = cache.keys().asSequence().mapNotNull { id ->
+            if (id == SOURCE_CHECKS) return@mapNotNull null
             val row = cache.optJSONObject(id) ?: return@mapNotNull null
             val source = visible[row.optString("sourceId")] ?: return@mapNotNull null
             if (source.repository in sourceBuiltIns()) return@mapNotNull null
@@ -173,11 +175,13 @@ object ProtonExtras {
                         Regex("a^"), source.id, "manifest")
                 }
             }
+            val sourceChecks = cache.optJSONObject(SOURCE_CHECKS) ?: JSONObject()
             val due = candidates.groupBy { it.sourceId }.filterValues { sourceTools ->
-                sourceTools.any { tool ->
-                    val at = cache.optJSONObject(tool.id)?.optLong("at", 0L) ?: 0L
-                    force || (now - at) !in 0 until CHECK_EVERY_MS
-                }
+                val sourceId = sourceTools.first().sourceId
+                val checkedAt = sourceChecks.optLong(sourceId, 0L).takeIf { it > 0L }
+                    ?: sourceTools.maxOfOrNull { cache.optJSONObject(it.id)?.optLong("at", 0L) ?: 0L }
+                    ?: 0L
+                force || (now - checkedAt) !in 0 until CHECK_EVERY_MS
             }
             if (due.isEmpty() || !force && (now - lastAttempt) in 0 until RETRY_MS) return false
             lastAttempt = now
@@ -209,13 +213,15 @@ object ProtonExtras {
                                 .put("name", asset.toolName.ifEmpty { tool.name })
                                 .put("prefix", asset.toolPrefix.ifEmpty { tool.prefix }))
                         }
+                        sourceChecks.put(sourceId, now)
+                        cache.put(SOURCE_CHECKS, sourceChecks)
+                        RepositorySources.atomicWrite(file, cache.toString().toByteArray(Charsets.UTF_8))
                     }
                 }.onFailure {
                     Log.w(TAG, "release check for ${source.repository}", it)
                     if (refreshError == null || GitHubArtifacts.isRateLimited(it)) refreshError = it
                 }
             }
-            runCatching { file.writeText(cache.toString()) }
             if (force) refreshError?.let { throw it }
             return true
         }

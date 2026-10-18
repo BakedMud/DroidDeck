@@ -103,7 +103,7 @@ object GitHubArtifacts {
 
     @JvmStatic fun cachedReleases(
         context: Context, key: String, builtIns: List<String>, source: RepositorySources.Source,
-    ): List<Release> = synchronized(RepositorySources) {
+    ): List<Release> = synchronized(RepositorySources.lock) {
         val current = RepositorySources.visible(context, key, builtIns).firstOrNull {
             it.id == source.id && it.repository == source.repository
         } ?: return@synchronized emptyList()

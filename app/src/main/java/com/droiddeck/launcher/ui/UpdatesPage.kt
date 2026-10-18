@@ -97,7 +97,8 @@ class UpdatesActions(
 internal fun UpdatesPage(s: FrontEndState, a: FrontEndActions, modifier: Modifier) {
     val u = s.updates
     val ua = a.updates
-    val me = remember { AppUpdates.installed() }
+    val signerRevision = AppUpdates.signerRevision
+    val me = remember(signerRevision) { AppUpdates.installed() }
     val colors = MaterialTheme.colorScheme
     Column(modifier = modifier) {
         PageHeader(stringResource(R.string.upd_title)) {

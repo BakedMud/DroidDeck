@@ -1148,26 +1148,31 @@ object ComponentsManager {
                 val bytes = GitHubArtifacts.readReleaseAsset(
                     context, sourceScope(comp), sourceBuiltIns(comp), source, release.tag, sidecar, 256 * 1024,
                 )
-                val manifest = JSONObject(bytes.toString(Charsets.UTF_8))
-                require(manifest.getInt("schema") == 1 && manifest.getString("component") == comp) {
-                    "Component manifest does not match $comp"
-                }
-                val rows = manifest.optJSONArray("artifacts") ?: JSONArray().apply {
-                    manifest.optJSONObject("artifact")?.let { put(it) }
-                }
-                require(rows.length() in 1..64) { "Component manifest has an invalid artifact count" }
-                for (index in 0 until rows.length()) {
-                    val row = rows.getJSONObject(index)
-                    val name = row.getString("name")
-                    require(name.endsWith(".wcp", ignoreCase = true)) { "Component artifact is not a WCP" }
-                    val asset = release.assets.singleOrNull { it.name == name }
-                        ?: throw IllegalArgumentException("Component artifact is missing or ambiguous")
-                    val declaredSha = row.getString("sha256")
-                    require(Regex("[0-9a-f]{64}").matches(declaredSha) && declaredSha == asset.sha256) {
-                        "Component artifact digest does not match"
+                val start = items.size
+                try {
+                    val manifest = JSONObject(bytes.toString(Charsets.UTF_8))
+                    if (manifest.optString("component") != comp) continue
+                    require(manifest.getInt("schema") == 1) { "Component manifest has an invalid schema" }
+                    val rows = manifest.optJSONArray("artifacts") ?: JSONArray().apply {
+                        manifest.optJSONObject("artifact")?.let { put(it) }
                     }
-                    require(row.getLong("size") == asset.size) { "Component artifact size does not match" }
-                    items.add(catalogItem(comp, source, release, asset))
+                    require(rows.length() in 1..64) { "Component manifest has an invalid artifact count" }
+                    for (index in 0 until rows.length()) {
+                        val row = rows.getJSONObject(index)
+                        val name = row.getString("name")
+                        require(name.endsWith(".wcp", ignoreCase = true)) { "Component artifact is not a WCP" }
+                        val asset = release.assets.singleOrNull { it.name == name }
+                            ?: throw IllegalArgumentException("Component artifact is missing or ambiguous")
+                        val declaredSha = row.getString("sha256")
+                        require(Regex("[0-9a-f]{64}").matches(declaredSha) && declaredSha == asset.sha256) {
+                            "Component artifact digest does not match"
+                        }
+                        require(row.getLong("size") == asset.size) { "Component artifact size does not match" }
+                        items.add(catalogItem(comp, source, release, asset))
+                    }
+                } catch (error: Exception) {
+                    items.subList(start, items.size).clear()
+                    Log.w(TAG, "sidecar ${sidecar.name} in ${release.tag}", error)
                 }
             }
         }

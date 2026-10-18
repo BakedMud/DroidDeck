@@ -75,7 +75,7 @@ object DriverPairs {
     fun newestDdTurnip(pairs: List<DriverPair>): String? = pairs
         .filter { it.key.startsWith("$DD_TURNIP:") && it.complete }
         .maxByOrNull { p ->
-            Regex("""(\d+)\.(\d+)\.(\d+)$""").find(p.key)?.destructured
+            Regex("""(\d+)\.(\d+)\.(\d+)$""").find(p.assets.firstOrNull()?.pairKind ?: p.key)?.destructured
                 ?.let { (major, minor, patch) -> major.toLong() * 1_000_000_000_000 + minor.toLong() * 1_000_000 + patch.toLong() } ?: -1L
         }?.key
 }

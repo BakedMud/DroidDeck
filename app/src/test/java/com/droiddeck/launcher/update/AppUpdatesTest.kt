@@ -26,14 +26,14 @@ import java.net.HttpURLConnection
 
 @RunWith(RobolectricTestRunner::class)
 class AppUpdatesTest {
-    private fun apk(versionCode: Int = 9) = AppUpdates.Apk(
+    private fun apk(versionCode: Int = 9, signer: String = BuildConfig.RELEASE_SIGNER) = AppUpdates.Apk(
         "DroidDeck.apk",
         "https://github.com/Droid-Deck/DroidDeck-CI/releases/download/t/DroidDeck.apk",
         10,
         "a".repeat(64),
         "com.droiddeck.launcher",
         versionCode,
-        BuildConfig.RELEASE_SIGNER,
+        signer,
     )
 
     private fun release(
@@ -42,6 +42,7 @@ class AppUpdatesTest {
         version: String? = null,
         versionCode: Int = 9,
         withApk: Boolean = true,
+        signer: String = BuildConfig.RELEASE_SIGNER,
     ) = AppUpdates.Release(
         "t",
         "title",
@@ -52,7 +53,7 @@ class AppUpdatesTest {
         versionCode,
         0L,
         "",
-        if (withApk) apk(versionCode) else null,
+        if (withApk) apk(versionCode, signer) else null,
     )
 
     private val stable = release(
@@ -72,7 +73,11 @@ class AppUpdatesTest {
         version: String = "0.2.0",
         versionCode: Int = 9,
         ciBuild: Boolean = true,
-    ) = Installed(commit, pr, version, versionCode, updatable = true, ciBuild = ciBuild)
+        updatable: Boolean = true,
+        signers: Set<String> = if (updatable) setOf(BuildConfig.RELEASE_SIGNER) else emptySet(),
+        lineage: Set<String> = emptySet(),
+    ) = Installed(commit, pr, version, versionCode, updatable, ciBuild = ciBuild,
+        signerDigests = signers, signerLineageDigests = lineage)
 
     private fun change(commit: String, title: String, publishedAt: Long) =
         PreviewChange(commit, title, "Summary for $title", publishedAt)
@@ -138,6 +143,53 @@ class AppUpdatesTest {
     fun aMissingVariantIsBlockedBeforeDownload() {
         val missing = release("ddddddd", withApk = false)
         assertNotNull(AppUpdates.installBlock(missing, me("eeeeeee")))
+    }
+
+    @Test
+    fun signerPreflightBlocksLocalBuildsButDefersTrustedRotationToApkVerification() {
+        val rotated = "0".repeat(64)
+        val candidate = release("ddddddd", signer = rotated)
+        val trusted = me("eeeeeee", signers = setOf(BuildConfig.RELEASE_SIGNER))
+        assertEquals(AppUpdates.SignerCompatibility.NEEDS_APK_LINEAGE,
+            AppUpdates.signerCompatibility(candidate.apk!!, trusted))
+        assertNull(AppUpdates.installBlock(candidate, trusted))
+
+        val local = me("eeeeeee", updatable = false, signers = setOf("f".repeat(64)))
+        assertEquals(AppUpdates.SignerCompatibility.INCOMPATIBLE,
+            AppUpdates.signerCompatibility(candidate.apk!!, local))
+        assertNotNull(AppUpdates.installBlock(candidate, local))
+        val localCandidate = release("ddddddd", signer = "f".repeat(64))
+        assertEquals(AppUpdates.SignerCompatibility.INCOMPATIBLE,
+            AppUpdates.signerCompatibility(localCandidate.apk!!, local))
+        assertNotNull(AppUpdates.installBlock(localCandidate, local))
+    }
+
+    @Test
+    fun installedTrustAcceptsTheEmbeddedSignerInLineageButRejectsASibling() {
+        val root = "1".repeat(64)
+        val embedded = "2".repeat(64)
+        val sibling = "3".repeat(64)
+        assertTrue(AppUpdates.trustedInstalledIdentity(
+            SelfInstaller.VerifiedIdentity(setOf(root), setOf(root, embedded)), embedded,
+        ))
+        assertFalse(AppUpdates.trustedInstalledIdentity(
+            SelfInstaller.VerifiedIdentity(setOf(sibling), setOf(root, sibling)), embedded,
+        ))
+    }
+
+    @Test
+    fun completedSignerVerificationPublishesANewInstalledSnapshot() {
+        val before = AppUpdates.signerRevision
+        val identity = SelfInstaller.VerifiedIdentity(setOf(BuildConfig.RELEASE_SIGNER), emptySet())
+        try {
+            AppUpdates.applyInstalledSignerIdentity(identity, true)
+            val installed = AppUpdates.installed()
+            assertEquals(before + 1, installed.signerRevision)
+            assertTrue(installed.updatable)
+            assertEquals(identity.current, installed.signerDigests)
+        } finally {
+            AppUpdates.applyInstalledSignerIdentity(SelfInstaller.VerifiedIdentity(emptySet(), emptySet()), false)
+        }
     }
 
     @Test
@@ -279,16 +331,32 @@ class AppUpdatesTest {
     }
 
     @Test
-    fun publishedCatalogRejectsAnotherSigner() {
+    fun publishedCatalogRejectsMalformedSigner() {
         try {
             AppUpdates.readPublishedCatalog(
-                publishedCatalog("0".repeat(64)),
+                publishedCatalog("not-a-sha256"),
                 "com.droiddeck.launcher",
                 123L,
             )
             fail("wrong signer should be rejected")
         } catch (_: IOException) {
         }
+    }
+
+    @Test
+    fun officialCatalogCanDeclareARotatedSignerForApkLineageVerification() {
+        val rotated = "0".repeat(64)
+        val parsed = AppUpdates.readPublishedCatalog(
+            publishedCatalog(rotated),
+            "com.droiddeck.launcher",
+            123L,
+        )
+        val release = parsed.preview!!
+        assertEquals(rotated, release.apk!!.signerSha256)
+        val trusted = me("eeeeeee", signers = setOf(BuildConfig.RELEASE_SIGNER))
+        assertEquals(AppUpdates.SignerCompatibility.NEEDS_APK_LINEAGE,
+            AppUpdates.signerCompatibility(release.apk!!, trusted))
+        assertNull(AppUpdates.installBlock(release, trusted))
     }
 
     @Test

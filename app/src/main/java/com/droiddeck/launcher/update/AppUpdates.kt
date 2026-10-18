@@ -3,13 +3,21 @@ package com.droiddeck.launcher.update
 import android.content.Context
 import android.content.pm.PackageManager
 import android.os.Build
+import android.os.Handler
+import android.os.Looper
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableIntStateOf
+import androidx.compose.runtime.setValue
 import com.droiddeck.launcher.BuildConfig
 import com.droiddeck.launcher.R
 import com.droiddeck.launcher.artifact.GitHubArtifacts
 import com.droiddeck.launcher.artifact.RepositorySources
 import org.json.JSONArray
 import org.json.JSONObject
+import java.io.File
 import java.io.IOException
+import java.security.MessageDigest
+import kotlin.concurrent.thread
 
 object AppUpdates {
     private const val REPO = "Droid-Deck/DroidDeck"
@@ -19,6 +27,8 @@ object AppUpdates {
     private const val KEY_CATALOG = "catalog"
     private const val KEY_CHANNEL = "channel"
     private const val KEY_SOURCE = "source"
+    private const val KEY_SIGNER_STAMP = "signer_stamp"
+    private const val KEY_SIGNER_TRUSTED = "signer_trusted"
     private const val CATALOG_SCHEMA = 1
 
     enum class Channel { STABLE, NIGHTLY, TEST }
@@ -80,6 +90,9 @@ object AppUpdates {
         val updatable: Boolean,
         val committedAt: Long = 0L,
         val ciBuild: Boolean = BuildConfig.CI_BUILD,
+        val signerDigests: Set<String> = if (updatable) setOf(BuildConfig.RELEASE_SIGNER.lowercase()) else emptySet(),
+        val signerLineageDigests: Set<String> = emptySet(),
+        val signerRevision: Int = 0,
     )
 
     enum class PreviewHistoryKind { CURRENT, BEHIND, RECENT }
@@ -98,37 +111,107 @@ object AppUpdates {
         GONE,
     }
 
-    @Volatile private var releaseSigned = BuildConfig.CI_BUILD
+    internal enum class SignerCompatibility { MATCH, NEEDS_APK_LINEAGE, INCOMPATIBLE }
+
+    private data class InstalledSignerState(
+        val identity: SelfInstaller.VerifiedIdentity,
+        val trusted: Boolean,
+        val stamp: String,
+    )
+
+    @Volatile private var installedIdentity = SelfInstaller.VerifiedIdentity(emptySet(), emptySet())
+    @Volatile private var installedTrusted = false
+    var signerRevision by mutableIntStateOf(0)
+        private set
 
     fun init(context: Context) {
-        releaseSigned = runCatching { hasInstalledSigner(context) }.getOrDefault(BuildConfig.CI_BUILD)
+        applyInstalledSignerIdentity(SelfInstaller.VerifiedIdentity(emptySet(), emptySet()), false)
+        val state = runCatching { installedSignerState(context) }.getOrNull() ?: return
+        applyInstalledSignerIdentity(state.identity, state.trusted)
+        if (state.trusted || Build.VERSION.SDK_INT >= 28 ||
+            !Regex("[0-9a-fA-F]{64}").matches(BuildConfig.RELEASE_SIGNER)) return
+        val preferences = prefs(context)
+        if (preferences.getString(KEY_SIGNER_STAMP, null) == state.stamp &&
+            preferences.contains(KEY_SIGNER_TRUSTED)) {
+            applyInstalledSignerIdentity(state.identity, preferences.getBoolean(KEY_SIGNER_TRUSTED, false))
+            return
+        }
+        thread(name = "DroidDeck update signer", isDaemon = true) {
+            val identity = runCatching {
+                SelfInstaller.verifiedApk(File(context.applicationInfo.sourceDir)).producer
+            }.getOrNull() ?: return@thread
+            val trusted = trustedInstalledIdentity(identity)
+            preferences.edit().putString(KEY_SIGNER_STAMP, state.stamp)
+                .putBoolean(KEY_SIGNER_TRUSTED, trusted).commit()
+            Handler(Looper.getMainLooper()).post { applyInstalledSignerIdentity(identity, trusted) }
+        }
+    }
+
+    internal fun applyInstalledSignerIdentity(identity: SelfInstaller.VerifiedIdentity, trusted: Boolean) {
+        installedIdentity = identity
+        installedTrusted = trusted
+        signerRevision++
     }
 
     @Suppress("DEPRECATION")
-    private fun hasInstalledSigner(context: Context): Boolean =
-        if (Build.VERSION.SDK_INT >= 28) {
-            val signing = context.packageManager.getPackageInfo(
-                context.packageName, PackageManager.GET_SIGNING_CERTIFICATES,
-            ).signingInfo
-            signing != null && if (signing.hasMultipleSigners()) {
-                signing.apkContentsSigners.orEmpty().isNotEmpty()
-            } else {
-                signing.signingCertificateHistory.orEmpty().isNotEmpty()
-            }
+    private fun installedSignerState(context: Context): InstalledSignerState {
+        val flags = if (Build.VERSION.SDK_INT >= 28) {
+            PackageManager.GET_SIGNING_CERTIFICATES
         } else {
-            context.packageManager.getPackageInfo(
-                context.packageName, PackageManager.GET_SIGNATURES,
-            ).signatures.orEmpty().isNotEmpty()
+            PackageManager.GET_SIGNATURES
         }
+        val info = context.packageManager.getPackageInfo(context.packageName, flags)
+        val current = if (Build.VERSION.SDK_INT >= 28) {
+            info.signingInfo?.apkContentsSigners.orEmpty()
+        } else {
+            info.signatures.orEmpty()
+        }
+        val lineage = if (Build.VERSION.SDK_INT >= 28) {
+            info.signingInfo?.signingCertificateHistory.orEmpty()
+        } else {
+            emptyArray()
+        }
+        fun digests(signatures: Array<out android.content.pm.Signature>): Set<String> =
+            signatures.mapTo(LinkedHashSet()) { signature ->
+                MessageDigest.getInstance("SHA-256").digest(signature.toByteArray())
+                    .joinToString("") { "%02x".format(it.toInt() and 0xff) }
+            }
+        val currentDigests = digests(current)
+        val lineageDigests = digests(lineage)
+        val identity = SelfInstaller.VerifiedIdentity(currentDigests, lineageDigests)
+        val versionCode = if (Build.VERSION.SDK_INT >= 28) info.longVersionCode else info.versionCode.toLong()
+        val apk = File(context.applicationInfo.sourceDir)
+        val stamp = listOf(
+            info.lastUpdateTime,
+            versionCode,
+            apk.path,
+            apk.length(),
+            apk.lastModified(),
+            BuildConfig.RELEASE_SIGNER.lowercase(),
+        ).joinToString(":")
+        return InstalledSignerState(identity, trustedInstalledIdentity(identity), stamp)
+    }
 
-    fun installed(): Installed = Installed(
-        BuildConfig.SOURCE_COMMIT,
-        BuildConfig.PR_NUMBER,
-        BuildConfig.VERSION_NAME,
-        BuildConfig.VERSION_CODE,
-        releaseSigned,
-        BuildConfig.COMMIT_TIME,
-    )
+    fun installed(): Installed {
+        val identity = installedIdentity
+        return Installed(
+            BuildConfig.SOURCE_COMMIT,
+            BuildConfig.PR_NUMBER,
+            BuildConfig.VERSION_NAME,
+            BuildConfig.VERSION_CODE,
+            installedTrusted,
+            BuildConfig.COMMIT_TIME,
+            signerDigests = identity.current,
+            signerLineageDigests = identity.lineage,
+            signerRevision = signerRevision,
+        )
+    }
+
+    internal fun trustedInstalledIdentity(
+        identity: SelfInstaller.VerifiedIdentity,
+        releaseSigner: String = BuildConfig.RELEASE_SIGNER,
+    ): Boolean = Regex("[0-9a-fA-F]{64}").matches(releaseSigner) &&
+        (identity.current + identity.lineage).any { it.equals(releaseSigner, ignoreCase = true) }
 
     fun release(catalog: Catalog, follow: Follow): Release? = when (follow.channel) {
         Channel.STABLE -> catalog.stable
@@ -195,8 +278,16 @@ object AppUpdates {
 
     fun installBlock(r: Release, me: Installed = installed()): InstallBlock? = when {
         r.apk == null -> InstallBlock(R.string.upd_block_no_apk)
+        signerCompatibility(r.apk, me) == SignerCompatibility.INCOMPATIBLE ->
+            InstallBlock(R.string.selfinst_wrong_signer)
         r.apk.versionCode < me.versionCode -> InstallBlock(R.string.upd_block_version_code, r.apk.versionCode, me.versionCode)
         else -> null
+    }
+
+    internal fun signerCompatibility(apk: Apk, me: Installed): SignerCompatibility = when {
+        !me.updatable -> SignerCompatibility.INCOMPATIBLE
+        me.signerDigests.any { it.equals(apk.signerSha256, ignoreCase = true) } -> SignerCompatibility.MATCH
+        else -> SignerCompatibility.NEEDS_APK_LINEAGE
     }
 
     class InstallBlock(@androidx.annotation.StringRes val text: Int, private vararg val args: Any) {
@@ -363,9 +454,8 @@ object AppUpdates {
         if (!Regex("^[0-9a-f]{64}$").matches(sha)) {
             throw IOException("The update catalog has an invalid checksum")
         }
-        val official = RepositorySources.canonicalRepository(ciRepo) == RepositorySources.canonicalRepository(CI_REPO)
-        if (!Regex("^[0-9a-f]{64}$").matches(signer) || (official && !signer.equals(BuildConfig.RELEASE_SIGNER, ignoreCase = true))) {
-            throw IOException("The update catalog is not signed for DroidDeck's release key")
+        if (!Regex("^[0-9a-f]{64}$").matches(signer)) {
+            throw IOException("The update catalog has an invalid signer identity")
         }
         val allowed = listOf(
             "https://github.com/$sourceRepo/releases/download/",

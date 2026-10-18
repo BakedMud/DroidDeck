@@ -223,4 +223,23 @@ class DriverPairsTest {
         assertEquals(DriverPairs.WN_BALANCED, DriverPairs.recommendedKey(gpu(825), pairs))
         assertEquals(DriverPairs.BANNER, DriverPairs.recommendedKey(gpu(740), pairs))
     }
+
+    @Test
+    fun adreno840RanksSourceQualifiedDdTurnipByItsUnqualifiedVersion() {
+        fun bundle(tag: String, sourceId: String): TurnipReleases.Asset {
+            val kind = DriverPairs.ddTurnip(tag)
+            return TurnipReleases.Asset(
+                "Custom", tag, "$tag.zip", "https://example/$tag", 6_000_000, false,
+                "Android + Linux", "0".repeat(64), "$kind:$sourceId", bundle = true, pairKind = kind,
+            )
+        }
+        val pairs = DriverPairs.from(TurnipReleases.Check(
+            listOf(bundle("DD-Turnip-v1.2.3", "a".repeat(64)), bundle("DD-Turnip-v2.0.0", "b".repeat(64))),
+            emptyList(), emptyList(), 0L,
+        ))
+        assertEquals(
+            "${DriverPairs.ddTurnip("DD-Turnip-v2.0.0")}:${"b".repeat(64)}",
+            DriverPairs.recommendedKey(gpu(840), pairs),
+        )
+    }
 }

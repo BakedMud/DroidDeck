@@ -22,6 +22,8 @@ import org.robolectric.RuntimeEnvironment
 import org.robolectric.annotation.Config
 import java.io.File
 import java.io.IOException
+import java.io.ByteArrayInputStream
+import java.net.HttpURLConnection
 
 @RunWith(RobolectricTestRunner::class)
 @Config(sdk = [28], manifest = Config.NONE)
@@ -95,6 +97,70 @@ class ComponentsCatalogSourcesTest {
         assertEquals(cached.items.map { it.id }, failed.items.map { it.id })
         assertEquals(cached.fetchedAt, failed.fetchedAt)
         assertFalse(ComponentsManager.catalog(context, false).rateLimited)
+    }
+
+    @Test
+    fun unrelatedAndMalformedSidecarsDoNotHideLaterValidArtifacts() {
+        val comp = "dxvk"
+        ComponentsManager.COMPONENTS.filter { it != comp }.forEach { other ->
+            ComponentsManager.saveSources(context, other, ComponentsManager.sources(context, other).map {
+                it.copy(hidden = true)
+            })
+        }
+        val source = ComponentsManager.sources(context, comp).single()
+        val sha = "a".repeat(64)
+        val bodies = linkedMapOf(
+            "unrelated" to JSONObject().put("schema", 1).put("component", "fex").toString(),
+            "malformed" to "{broken",
+            "valid" to JSONObject().put("schema", 1).put("component", comp).put("artifact", JSONObject()
+                .put("name", "dxvk.wcp").put("size", 123).put("sha256", sha)).toString(),
+        )
+        fun asset(id: Long, tag: String, name: String, body: String, digest: String = RepositorySources.sha256(body.toByteArray())) =
+            JSONObject().put("id", id).put("name", name).put("size", body.toByteArray().size)
+                .put("digest", "sha256:$digest")
+                .put("browser_download_url", GitHubArtifacts.releaseAssetUrl(source.repository, tag, name))
+        val releases = JSONArray()
+        bodies.entries.forEachIndexed { index, (tag, body) ->
+            val assets = JSONArray().put(asset(index.toLong() + 1, tag, "droiddeck-component.json", body))
+            if (tag == "valid") {
+                assets.put(JSONObject().put("id", 99).put("name", "dxvk.wcp").put("size", 123)
+                    .put("digest", "sha256:$sha")
+                    .put("browser_download_url", GitHubArtifacts.releaseAssetUrl(source.repository, tag, "dxvk.wcp")))
+            }
+            releases.put(JSONObject().put("id", index + 10).put("tag_name", tag).put("assets", assets))
+        }
+        val production = GitHubArtifacts.openConnection
+        var failValidSidecar = false
+        try {
+            GitHubArtifacts.openConnection = { url ->
+                if (failValidSidecar && url.path.endsWith("/valid/droiddeck-component.json")) {
+                    throw IOException("offline")
+                }
+                val body = when (url.path) {
+                    "/repos/${source.repository}" -> JSONObject().put("id", 123).put("full_name", source.repository).toString()
+                    "/repositories/123/releases" -> releases.toString()
+                    else -> bodies.entries.singleOrNull { url.path.endsWith("/${it.key}/droiddeck-component.json") }?.value
+                        ?: error("Unexpected request: $url")
+                }
+                object : HttpURLConnection(url) {
+                    override fun connect() {}
+                    override fun disconnect() {}
+                    override fun usingProxy() = false
+                    override fun getResponseCode() = 200
+                    override fun getInputStream() = ByteArrayInputStream(body.toByteArray())
+                }
+            }
+            val catalog = ComponentsManager.catalog(context, true)
+            assertTrue(catalog.failed.toString(), catalog.failed.isEmpty())
+            assertEquals(listOf("dxvk.wcp"), catalog.items.map { it.file })
+            failValidSidecar = true
+            val warmFailure = ComponentsManager.catalog(context, true)
+            assertEquals(listOf("dxvk.wcp"), warmFailure.items.map { it.file })
+            assertEquals(listOf("dxvk:${source.repository}"), warmFailure.failed)
+        } finally {
+            GitHubArtifacts.openConnection = production
+            GitHubArtifacts.clearRateLimits()
+        }
     }
 
     @Test

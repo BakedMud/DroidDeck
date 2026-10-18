@@ -356,6 +356,26 @@ class ProtonExtrasTest {
     }
 
     @Test
+    fun customSourceWithoutAMatchingAssetStillHonorsTheCheckInterval() {
+        withCustomRelease(listOf("custom-arm64.tar.gz")) {
+            val context = RuntimeEnvironment.getApplication()
+            val transport = GitHubArtifacts.openConnection
+            var calls = 0
+            GitHubArtifacts.openConnection = { url ->
+                calls++
+                transport(url)
+            }
+            val now = 1_900_000_000_000L
+            assertTrue(ProtonExtras.checkLatest(context, force = true, now = now))
+            val firstCalls = calls
+            assertTrue(firstCalls > 0)
+            assertFalse(ProtonExtras.checkLatest(context, now = now + 30 * 60_000L))
+            assertEquals(firstCalls, calls)
+            assertTrue(ProtonExtras.availableTools(context).isEmpty())
+        }
+    }
+
+    @Test
     fun customManifestIdentityTakesPrecedenceOverTheArchiveName() {
         withCustomRelease(listOf("GE-Proton11-7-aarch64.tar.gz"), manifestPrefix = "Custom-Proton") { source ->
             val context = RuntimeEnvironment.getApplication()
