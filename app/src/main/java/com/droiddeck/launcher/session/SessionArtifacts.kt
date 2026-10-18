@@ -342,6 +342,7 @@ object SessionArtifacts {
         for (dir in abandoned) {
             if (stopWhenSessionStarts && SessionState.running) break
             if (dir == current) continue
+            if (beforeGuestStart && dir != latestPreviousSession) continue
             val newest = dir == latestPreviousSession
             try {
                 val recoveryNote = File(dir, "ended-without-teardown.txt")
@@ -415,6 +416,7 @@ object SessionArtifacts {
                     break
                 }
                 SessionEvents.record("session.artifacts_recovered", mapOf("newest" to newest), dir)
+                if (beforeGuestStart) return
                 val scrubbed = scrubTree(record) { stopWhenSessionStarts && SessionState.running }
                 val marked = markScrubbed(scrubbed)
                 if (scrubbed.deferred) break

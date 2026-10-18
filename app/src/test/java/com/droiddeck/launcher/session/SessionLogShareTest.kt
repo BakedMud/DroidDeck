@@ -258,12 +258,14 @@ class SessionLogShareTest {
         val marker = File(root, "root/.droiddeck-vac-diagnostics")
         val launches = File(root, "root/.droiddeck-vac-launches")
         val runtimeSteamLog = File(SessionPrefs.steamRoot(context, "arm64"), "logs/startup-recovery-vac.log")
+        val sessionLog = File(folder, "session.log")
         val previousRunning = SessionState.running
         val previousPhase = SessionState.phase
         try {
             folder.deleteRecursively()
             folder.mkdirs()
             SessionArtifacts.recordClient(folder, "arm64")
+            sessionLog.writeText("$secret\n")
             marker.apply { parentFile!!.mkdirs(); writeText("0\narm64\n") }
             launches.writeText("startup VAC evidence\n")
             runtimeSteamLog.apply { parentFile!!.mkdirs(); writeText("startup VAC evidence\n") }
@@ -279,6 +281,14 @@ class SessionLogShareTest {
 
             assertEquals("startup VAC evidence\n", File(folder, "steam/startup-recovery-vac.log").readText())
             assertTrue(File(folder, "vac.txt").readText().contains("startup VAC evidence"))
+            assertTrue(File(folder, ".recovery-runtime-captured").isFile)
+            assertTrue(sessionLog.readText().contains(leaked))
+            assertFalse(File(folder, SessionArtifacts.COMPLETE_MARKER).exists())
+
+            SessionState.running = false
+            SessionArtifacts.finishAbandoned(context)
+
+            assertFalse(sessionLog.readText().contains(leaked))
             assertTrue(File(folder, SessionArtifacts.COMPLETE_MARKER).isFile)
         } finally {
             SessionState.running = previousRunning
@@ -290,11 +300,12 @@ class SessionLogShareTest {
         }
     }
 
-    @Test fun startupRecoveryExcludesCurrentFolderAndCompletesDeferredRuntimeCapture() {
+    @Test fun startupRecoveryExcludesCurrentFolderAndCapturesDeferredRuntime() {
         val context: android.content.Context = RuntimeEnvironment.getApplication()
         val root = com.droiddeck.launcher.runtime.LinuxRuntime.rootDir(context)
         val logs = com.droiddeck.launcher.runtime.LinuxRuntime.logDir(context)
         val day = SimpleDateFormat("yyyy-MM-dd", Locale.US).format(Date())
+        val olderFolder = File(logs, "$day-8999-older-recovery")
         val folder = File(logs, "$day-9000-deferred-recovery")
         val marker = File(root, "root/.droiddeck-vac-diagnostics")
         val launches = File(root, "root/.droiddeck-vac-launches")
@@ -304,6 +315,8 @@ class SessionLogShareTest {
         val previousLogsEnabled = SessionPrefs.logsEnabled(context)
         var currentFolder: File? = null
         try {
+            olderFolder.deleteRecursively()
+            olderFolder.mkdirs()
             folder.deleteRecursively()
             folder.mkdirs()
             SessionArtifacts.recordClient(folder, "arm64")
@@ -321,8 +334,17 @@ class SessionLogShareTest {
             assertEquals("deferred VAC evidence\n", File(folder, "steam/deferred-recovery-vac.log").readText())
             assertTrue(File(folder, "vac.txt").readText().contains("deferred VAC evidence"))
             assertTrue(File(folder, ".recovery-runtime-captured").isFile)
-            assertTrue(File(folder, SessionArtifacts.COMPLETE_MARKER).isFile)
+            assertFalse(File(folder, SessionArtifacts.COMPLETE_MARKER).exists())
+            assertFalse(File(olderFolder, "ended-without-teardown.txt").exists())
+            assertFalse(File(olderFolder, SessionArtifacts.COMPLETE_MARKER).exists())
             assertFalse(File(currentFolder, "ended-without-teardown.txt").exists())
+            assertFalse(File(currentFolder, SessionArtifacts.COMPLETE_MARKER).exists())
+
+            SessionState.running = false
+            SessionArtifacts.finishAbandoned(context)
+
+            assertTrue(File(folder, SessionArtifacts.COMPLETE_MARKER).isFile)
+            assertTrue(File(olderFolder, SessionArtifacts.COMPLETE_MARKER).isFile)
             assertFalse(File(currentFolder, SessionArtifacts.COMPLETE_MARKER).exists())
         } finally {
             SessionState.running = previousRunning
@@ -330,6 +352,7 @@ class SessionLogShareTest {
             SessionPaths.take()?.let { SessionPaths.release(context, it) }
             currentFolder?.deleteRecursively()
             SessionPrefs.setLogsEnabled(context, previousLogsEnabled)
+            olderFolder.deleteRecursively()
             folder.deleteRecursively()
             runtimeSteamLog.delete()
             marker.delete()
@@ -368,6 +391,11 @@ class SessionLogShareTest {
 
             assertEquals("session A\n", File(folder, "steam/expired-recovery.log").readText())
             assertTrue(File(folder, "ended-without-teardown.txt").readText().contains("runtime capture did not finish"))
+            assertFalse(File(folder, SessionArtifacts.COMPLETE_MARKER).exists())
+
+            SessionState.running = false
+            SessionArtifacts.finishAbandoned(context)
+
             assertTrue(File(folder, SessionArtifacts.COMPLETE_MARKER).isFile)
         } finally {
             SessionState.running = previousRunning
