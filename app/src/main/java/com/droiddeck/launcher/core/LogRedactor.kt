@@ -223,9 +223,11 @@ object LogRedactor {
         "(?<![\\d.])(?:10\\.\\d{1,3}|192\\.168|172\\.(?:1[6-9]|2\\d|3[01])|169\\.254)\\.\\d{1,3}\\.\\d{1,3}(?!\\.?\\d)"
     )
 
-    fun scrubTo(src: java.io.File, out: java.io.Writer) {
-        scrubLines(src, out, ::redact)
-    }
+    fun scrubTo(
+        src: java.io.File,
+        out: java.io.Writer,
+        shouldStop: () -> Boolean = { false },
+    ): Boolean = scrubLines(src, out, ::redact, shouldStop)
 
     fun redactForShare(line: String): String {
         if (line.isEmpty()) return line
@@ -238,11 +240,18 @@ object LogRedactor {
         }
     }
 
-    fun scrubForShare(src: java.io.File, out: java.io.Writer) {
-        scrubLines(src, out, ::redactForShare)
-    }
+    fun scrubForShare(
+        src: java.io.File,
+        out: java.io.Writer,
+        shouldStop: () -> Boolean = { false },
+    ): Boolean = scrubLines(src, out, ::redactForShare, shouldStop)
 
-    private fun scrubLines(src: java.io.File, out: java.io.Writer, scrub: (String) -> String) {
+    private fun scrubLines(
+        src: java.io.File,
+        out: java.io.Writer,
+        scrub: (String) -> String,
+        shouldStop: () -> Boolean,
+    ): Boolean {
         src.bufferedReader().use { input ->
             val chunk = CharArray(8192)
             val line = StringBuilder(4096)
@@ -259,8 +268,10 @@ object LogRedactor {
             }
 
             while (true) {
+                if (shouldStop()) return false
                 val count = input.read(chunk)
                 if (count < 0) break
+                if (shouldStop()) return false
                 for (i in 0 until count) {
                     val char = chunk[i]
                     if (pendingCarriageReturn) {
@@ -284,8 +295,12 @@ object LogRedactor {
                     }
                 }
             }
-            if (pendingCarriageReturn || pendingContent) emit()
+            if (pendingCarriageReturn || pendingContent) {
+                if (shouldStop()) return false
+                emit()
+            }
         }
+        return true
     }
 
     private fun quoted(value: String): String {

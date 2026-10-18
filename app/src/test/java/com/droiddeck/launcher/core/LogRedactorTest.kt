@@ -230,6 +230,19 @@ class LogRedactorTest {
         assertFalse(out.toString().contains(LogRedactor.OVERSIZED_LINE))
     }
 
+    @Test fun streamingScrubStopsBetweenInputChunks() {
+        val src = tmp.newFile("cancelled.log")
+        src.writeText("first safe line\n" + "x".repeat(20_000) + " sessionid=abcdef123456\n")
+        val out = StringWriter()
+        var checks = 0
+
+        val complete = LogRedactor.scrubTo(src, out) { ++checks >= 4 }
+
+        assertFalse(complete)
+        assertFalse(out.toString().contains("abcdef123456"))
+        assertTrue(checks >= 4)
+    }
+
     @Test fun manyLearnedAccountsKeepBoundariesAndLiteralNames() {
         val users = tmp.newFile("loginusers.vdf")
         users.writeText((0 until 40).joinToString("\n") {

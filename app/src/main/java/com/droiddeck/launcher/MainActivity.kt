@@ -918,13 +918,19 @@ class MainActivity : ComponentActivity() {
                                 .putExtra(com.droiddeck.launcher.files.FileManagerActivity.EXTRA_START_DIR, dir.absolutePath))
                         },
                         onLogs = {
-                            SessionPrefs.setLogsEnabled(this, !SessionPrefs.logsEnabled(this))
+                            val changed = SessionPrefs.setLogsEnabled(this, !SessionPrefs.logsEnabled(this))
+                            if (!changed) android.widget.Toast.makeText(
+                                this, R.string.setup_logging_update_failed, android.widget.Toast.LENGTH_LONG,
+                            ).show()
                             logsEnabled = SessionPrefs.logsEnabled(this)
                             gameDebugLogsEnabled = SessionPrefs.gameDebugLogsEnabled(this)
                             gameDebugLogsNeedsRestart = gameDebugLogsNeedsRestart()
                         },
                         onGameDebugLogs = {
-                            SessionPrefs.setGameDebugLogsEnabled(this, !SessionPrefs.gameDebugLogsEnabled(this))
+                            val changed = SessionPrefs.setGameDebugLogsEnabled(this, !SessionPrefs.gameDebugLogsEnabled(this))
+                            if (!changed) android.widget.Toast.makeText(
+                                this, R.string.setup_logging_update_failed, android.widget.Toast.LENGTH_LONG,
+                            ).show()
                             gameDebugLogsEnabled = SessionPrefs.gameDebugLogsEnabled(this)
                             gameDebugLogsNeedsRestart = gameDebugLogsNeedsRestart()
                         },

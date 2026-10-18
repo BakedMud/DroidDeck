@@ -345,6 +345,7 @@ class SessionService : Service() {
         com.droiddeck.launcher.stores.StoreLaunchRequests.start(this)
 
         val sessionDir = openSessionFolder()
+        GameEnvironmentStore.publish(this)
         val sessionLog = File(sessionDir, "session.log")
 
         Log.i(TAG, GpuClockPin.start(this))

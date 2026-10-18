@@ -65,6 +65,24 @@ class GameEnvironmentStoreTest {
         assertTrue(JSONObject(guest.readText()).getBoolean(GameEnvironmentStore.GAME_DEBUG_LOGS))
     }
 
+    @Test fun failedGameDebugOptOutLeavesTheEnabledPreferenceVisible() {
+        assertTrue(SessionPrefs.setGameDebugLogsEnabled(context, true))
+        assertTrue(SessionPrefs.gameDebugLogsEnabled(context))
+        val guestDirectory = guest.parentFile!!
+        guestDirectory.deleteRecursively()
+        guestDirectory.parentFile!!.mkdirs()
+        guestDirectory.writeText("blocks the guest configuration directory\n")
+        try {
+            assertFalse(SessionPrefs.setGameDebugLogsEnabled(context, false))
+            assertTrue(SessionPrefs.gameDebugLogsEnabled(context))
+        } finally {
+            guestDirectory.delete()
+            guestDirectory.mkdirs()
+            GameEnvironmentStore.publish(context)
+        }
+        assertTrue(JSONObject(guest.readText()).getBoolean(GameEnvironmentStore.GAME_DEBUG_LOGS))
+    }
+
     @Test fun gameDebugLogsWaitForARetainedSessionFolder() {
         assertNull(SessionPaths.current())
         assertTrue(SessionPaths.currentSessionLogsRetained(context))
