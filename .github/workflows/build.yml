@@ -774,7 +774,10 @@ jobs:
 
   sign:
     needs: build
-    if: github.event_name != 'pull_request' && github.ref == 'refs/heads/main'
+    if: >-
+      (github.event_name != 'pull_request' && github.ref == 'refs/heads/main') ||
+      (github.event_name == 'workflow_dispatch' && github.repository == 'wallentx/DroidDeck' &&
+       github.ref == 'refs/tags/0.4.0-wallentx.2' && inputs.component == 'apk')
     permissions:
       contents: read
       actions: read
@@ -782,6 +785,7 @@ jobs:
     with:
       environment: signing-main
       variants: ${{ needs.build.outputs.variants }}
+      label: ${{ startsWith(github.ref, 'refs/tags/') && github.ref_name || '' }}
     secrets: inherit
 
   announce:
