@@ -1,0 +1,65 @@
+{
+  "schema": 1,
+  "sourceRepo": "wallentx/DroidDeck",
+  "ciRepo": "wallentx/DroidDeck",
+  "generatedAt": 1792320200948,
+  "stable": null,
+  "preview": {
+    "tag": "main-fdb10a7d1a3fb4f385186f936099bb5c96dd56ad",
+    "title": "Fork Preview 0.4.0-wallentx.1",
+    "summary": "System Vulkan support for PowerVR, Xclipse, and Mali, configurable component sources, and improved game diagnostics.",
+    "commit": "fdb10a7d1a3fb4f385186f936099bb5c96dd56ad",
+    "pr": 0,
+    "version": null,
+    "versionCode": 14,
+    "publishedAt": 1792318275000,
+    "url": "https://github.com/wallentx/DroidDeck/releases/tag/main-fdb10a7d1a3fb4f385186f936099bb5c96dd56ad",
+    "apks": {
+      "com.droiddeck.launcher": {
+        "name": "DroidDeck-0.4.0-wallentx.1.apk",
+        "url": "https://github.com/wallentx/DroidDeck/releases/download/main-fdb10a7d1a3fb4f385186f936099bb5c96dd56ad/DroidDeck-0.4.0-wallentx.1.apk",
+        "size": 86305184,
+        "sha256": "051bebd1468234ab2a98e06025c3535ff336b796ce1a4b44ae6ea86dfad0e98e",
+        "packageName": "com.droiddeck.launcher",
+        "versionCode": 14,
+        "signerSha256": "80465aadce5c34a1d4f71ee4bd8cf7bcce64b5e7836e599f98d0b4f110e210c8"
+      },
+      "com.tencent.ig": {
+        "name": "DroidDeck-0.4.0-wallentx.1-pubg.apk",
+        "url": "https://github.com/wallentx/DroidDeck/releases/download/main-fdb10a7d1a3fb4f385186f936099bb5c96dd56ad/DroidDeck-0.4.0-wallentx.1-pubg.apk",
+        "size": 86305184,
+        "sha256": "c671d472753774cfacf449ad5b23b940dc2d69b29013cdb2d5849f90e4b9ffb8",
+        "packageName": "com.tencent.ig",
+        "versionCode": 14,
+        "signerSha256": "80465aadce5c34a1d4f71ee4bd8cf7bcce64b5e7836e599f98d0b4f110e210c8"
+      },
+      "com.antutu.benchmark.full": {
+        "name": "DroidDeck-0.4.0-wallentx.1-antutu.apk",
+        "url": "https://github.com/wallentx/DroidDeck/releases/download/main-fdb10a7d1a3fb4f385186f936099bb5c96dd56ad/DroidDeck-0.4.0-wallentx.1-antutu.apk",
+        "size": 86305184,
+        "sha256": "dfec8580edfc8d234554c8be06c0dde319133b39de104804ced9087c80dec0f0",
+        "packageName": "com.antutu.benchmark.full",
+        "versionCode": 14,
+        "signerSha256": "80465aadce5c34a1d4f71ee4bd8cf7bcce64b5e7836e599f98d0b4f110e210c8"
+      },
+      "com.ludashi.benchmark": {
+        "name": "DroidDeck-0.4.0-wallentx.1-ludashi.apk",
+        "url": "https://github.com/wallentx/DroidDeck/releases/download/main-fdb10a7d1a3fb4f385186f936099bb5c96dd56ad/DroidDeck-0.4.0-wallentx.1-ludashi.apk",
+        "size": 86305184,
+        "sha256": "2afef0bfa5c62929cf223083f7464aa1322b38de972409bf4239ebd34458e3b1",
+        "packageName": "com.ludashi.benchmark",
+        "versionCode": 14,
+        "signerSha256": "80465aadce5c34a1d4f71ee4bd8cf7bcce64b5e7836e599f98d0b4f110e210c8"
+      }
+    }
+  },
+  "recentPreviews": [
+    {
+      "commit": "fdb10a7d1a3fb4f385186f936099bb5c96dd56ad",
+      "title": "Fork Preview 0.4.0-wallentx.1",
+      "summary": "System Vulkan support for PowerVR, Xclipse, and Mali, configurable component sources, and improved game diagnostics.",
+      "publishedAt": 1792318275000
+    }
+  ],
+  "tests": []
+}
