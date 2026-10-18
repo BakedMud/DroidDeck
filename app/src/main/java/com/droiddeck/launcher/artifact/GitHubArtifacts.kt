@@ -65,7 +65,7 @@ object GitHubArtifacts {
         val json = JSONObject(fetch(url, MAX_JSON_BYTES) { sameApiIdentity(it, bound.repositoryId!!) }.toString(Charsets.UTF_8))
         require(!json.optBoolean("draft", false) && json.getString("tag_name") == tag) { "GitHub release tag does not match" }
         val release = parseRelease(bound, json)
-        return RepositorySources.whileCurrent(context, key, builtIns, source.id, generation) { release }
+        return RepositorySources.whileCurrent(context, key, builtIns, source, generation) { release }
     }
 
     @JvmStatic @JvmOverloads fun refreshReleases(
@@ -184,9 +184,9 @@ object GitHubArtifacts {
         require(!source.hidden && source.repositoryId != null && source.repositoryId > 0) { "Repository source is hidden or unbound" }
         validateAsset(source.repository, tag, asset)
         val generation = RepositorySources.generation(context, key, builtIns)
-        requireCurrent(context, key, builtIns, source.id, generation)
+        requireCurrent(context, key, builtIns, source, generation)
         if (matchesAsset(destination, asset)) {
-            return RepositorySources.whileCurrent(context, key, builtIns, source.id, generation) { destination }
+            return RepositorySources.whileCurrent(context, key, builtIns, source, generation) { destination }
         }
         val parent = destination.absoluteFile.parentFile ?: throw IOException("Missing download directory")
         if (!parent.isDirectory && !parent.mkdirs()) throw IOException("Cannot create download directory")
@@ -218,7 +218,7 @@ object GitHubArtifacts {
                 val actualHash = hash.digest().joinToString("") { "%02x".format(it) }
                 if (count != asset.size || actualHash != asset.sha256) throw IOException("Asset digest or size does not match")
             }
-            RepositorySources.whileCurrent(context, key, builtIns, source.id, generation) {
+            RepositorySources.whileCurrent(context, key, builtIns, source, generation) {
                 if (!partial.renameTo(destination)) throw IOException("Cannot publish downloaded asset")
             }
             return destination
