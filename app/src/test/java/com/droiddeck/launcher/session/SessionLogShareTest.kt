@@ -1,6 +1,7 @@
 package com.droiddeck.launcher.session
 
 import com.droiddeck.launcher.core.LogRedactor
+import org.junit.Assert.assertArrayEquals
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertNull
@@ -259,6 +260,7 @@ class SessionLogShareTest {
         val launches = File(root, "root/.droiddeck-vac-launches")
         val runtimeSteamLog = File(SessionPrefs.steamRoot(context, "arm64"), "logs/startup-recovery-vac.log")
         val sessionLog = File(folder, "session.log")
+        val crashLog = File(folder, "crash.log")
         val previousRunning = SessionState.running
         val previousPhase = SessionState.phase
         try {
@@ -282,6 +284,7 @@ class SessionLogShareTest {
             assertEquals("startup VAC evidence\n", File(folder, "steam/startup-recovery-vac.log").readText())
             assertTrue(File(folder, "vac.txt").readText().contains("startup VAC evidence"))
             assertTrue(File(folder, ".recovery-runtime-captured").isFile)
+            assertTrue(crashLog.isFile && crashLog.length() > 0L)
             assertTrue(sessionLog.readText().contains(leaked))
             assertFalse(File(folder, SessionArtifacts.COMPLETE_MARKER).exists())
 
@@ -367,12 +370,15 @@ class SessionLogShareTest {
         val marker = File(root, "root/.droiddeck-vac-diagnostics")
         val launches = File(root, "root/.droiddeck-vac-launches")
         val runtimeSteamLog = File(SessionPrefs.steamRoot(context, "arm64"), "logs/expired-recovery.log")
+        val crashLog = File(folder, "crash.log")
         val previousRunning = SessionState.running
         try {
             folder.deleteRecursively()
             folder.mkdirs()
             SessionArtifacts.recordClient(folder, "arm64")
             File(folder, "ended-without-teardown.txt").writeText("recovery began before session start\n")
+            val firstCrashSnapshot = "first crash snapshot\n".toByteArray()
+            crashLog.writeBytes(firstCrashSnapshot)
             File(folder, "vac.txt").mkdirs()
             marker.apply { parentFile!!.mkdirs(); writeText("0\narm64\n") }
             launches.writeText("VAC evidence that cannot be reported\n")
@@ -384,18 +390,21 @@ class SessionLogShareTest {
             assertFalse(File(folder, ".recovery-runtime-captured").exists())
             assertTrue(File(folder, ".recovery-runtime-expired").isFile)
             assertFalse(File(folder, SessionArtifacts.COMPLETE_MARKER).exists())
+            assertArrayEquals(firstCrashSnapshot, crashLog.readBytes())
 
             File(folder, "vac.txt").deleteRecursively()
             runtimeSteamLog.writeText("session B\n")
             SessionArtifacts.finishAbandoned(context, beforeGuestStart = true)
 
             assertEquals("session A\n", File(folder, "steam/expired-recovery.log").readText())
+            assertArrayEquals(firstCrashSnapshot, crashLog.readBytes())
             assertTrue(File(folder, "ended-without-teardown.txt").readText().contains("runtime capture did not finish"))
             assertFalse(File(folder, SessionArtifacts.COMPLETE_MARKER).exists())
 
             SessionState.running = false
             SessionArtifacts.finishAbandoned(context)
 
+            assertArrayEquals(firstCrashSnapshot, crashLog.readBytes())
             assertTrue(File(folder, SessionArtifacts.COMPLETE_MARKER).isFile)
         } finally {
             SessionState.running = previousRunning
@@ -403,6 +412,31 @@ class SessionLogShareTest {
             runtimeSteamLog.delete()
             marker.delete()
             launches.delete()
+        }
+    }
+
+    @Test fun emptyCrashSnapshotIsPreservedAcrossRecovery() {
+        val context: android.content.Context = RuntimeEnvironment.getApplication()
+        val folder = File(com.droiddeck.launcher.runtime.LinuxRuntime.logDir(context), "9999-12-31-02-empty-crash")
+        val crashLog = File(folder, "crash.log")
+        val previousRunning = SessionState.running
+        try {
+            folder.deleteRecursively()
+            folder.mkdirs()
+            crashLog.writeBytes(ByteArray(0))
+            SessionState.running = true
+
+            SessionArtifacts.finishAbandoned(context, beforeGuestStart = true)
+            assertTrue(crashLog.isFile)
+            assertEquals(0L, crashLog.length())
+
+            SessionState.running = false
+            SessionArtifacts.finishAbandoned(context)
+            assertEquals(0L, crashLog.length())
+            assertTrue(File(folder, SessionArtifacts.COMPLETE_MARKER).isFile)
+        } finally {
+            SessionState.running = previousRunning
+            folder.deleteRecursively()
         }
     }
 }

@@ -408,7 +408,10 @@ object SessionArtifacts {
                     markScrubbed(record)
                     break
                 }
-                SessionLogCapture.dumpCrashBuffer(File(dir, "crash.log"))
+                val crashLog = File(dir, "crash.log")
+                if (!crashLog.exists()) {
+                    SessionLogCapture.dumpCrashBuffer(crashLog)
+                }
                 if (stopWhenSessionStarts && SessionState.running) {
                     record.failed = true
                     record.deferred = true
