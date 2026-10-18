@@ -432,6 +432,7 @@ class SessionLogShareTest {
 
             SessionState.running = false
             SessionArtifacts.finishAbandoned(context)
+            assertTrue(crashLog.isFile)
             assertEquals(0L, crashLog.length())
             assertTrue(File(folder, SessionArtifacts.COMPLETE_MARKER).isFile)
         } finally {
