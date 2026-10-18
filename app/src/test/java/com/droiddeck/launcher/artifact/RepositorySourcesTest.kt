@@ -5,8 +5,10 @@ import java.util.concurrent.ConcurrentLinkedQueue
 import java.util.concurrent.CountDownLatch
 import java.util.concurrent.TimeUnit
 import kotlin.concurrent.thread
+import org.json.JSONObject
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
+import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
 import org.junit.Test
 import org.junit.runner.RunWith
@@ -32,6 +34,110 @@ class RepositorySourcesTest {
             "https://github.com/[bad/repo",
         )
         invalid.forEach { assertTrue(it, runCatching { RepositorySources.canonicalRepository(it) }.isFailure) }
+    }
+
+    @Test fun catalogBranchesFollowGitBranchSyntaxWithoutChangingCase() {
+        val valid = listOf("main", "wallentx/powervr", "release+gpu%2", "éclair/驱动", "a".repeat(256))
+        valid.forEach { assertEquals(it, RepositorySources.normalizeCatalogBranch("  $it  ")) }
+        assertNull(RepositorySources.normalizeCatalogBranch(null))
+        assertNull(RepositorySources.normalizeCatalogBranch("   "))
+
+        val invalid = listOf(
+            "HEAD", "-leading", "/leading", "trailing/", "two//slashes", "two..dots", "bad@{name",
+            ".hidden", "path/.hidden", "branch.lock", "path/branch.lock", "trailing.", "has space",
+            "tab\tname", "tilde~", "caret^", "colon:", "question?", "star*", "open[", "back\\slash",
+            "a".repeat(257),
+        )
+        invalid.forEach { branch ->
+            assertTrue(branch, runCatching { RepositorySources.normalizeCatalogBranch(branch) }.isFailure)
+        }
+    }
+
+    @Test fun schemaOneWithoutCatalogBranchMigratesAsDefaultBranch() {
+        val original = RepositorySources.list(app, key, defaults).single()
+        RepositorySources.save(app, key, defaults, listOf(original))
+        val file = RepositorySources.policyFile(app, key)
+        assertFalse(file.readText().contains("catalogBranch"))
+        assertNull(RepositorySources.list(app, key, defaults).single().catalogBranch)
+    }
+
+    @Test fun savingAndClearingCatalogBranchPreservesSourceIdentityAndBinding() {
+        val original = RepositorySources.list(app, key, defaults).single()
+        val firstGeneration = RepositorySources.generation(app, key, defaults)
+        val bound = RepositorySources.bind(app, key, defaults, original, 123, firstGeneration)
+        val branched = RepositorySources.save(
+            app, key, defaults, listOf(bound.copy(catalogBranch = " Wallentx/PowerVR ")),
+        ).single()
+        val branchGeneration = RepositorySources.generation(app, key, defaults)
+
+        assertEquals(original.id, branched.id)
+        assertEquals(123L, branched.repositoryId)
+        assertEquals("Wallentx/PowerVR", branched.catalogBranch)
+        assertTrue(branchGeneration > firstGeneration)
+        assertFalse(RepositorySources.isCurrent(app, key, defaults, original, branchGeneration))
+        assertTrue(RepositorySources.isCurrent(app, key, defaults, branched, branchGeneration))
+        assertTrue(runCatching {
+            RepositorySources.bind(app, key, defaults, original, 123, branchGeneration)
+        }.isFailure)
+
+        val cleared = RepositorySources.save(
+            app, key, defaults, listOf(branched.copy(catalogBranch = "  ")),
+        ).single()
+        assertNull(cleared.catalogBranch)
+        assertEquals(original.id, cleared.id)
+        assertEquals(123L, cleared.repositoryId)
+        assertTrue(RepositorySources.generation(app, key, defaults) > branchGeneration)
+    }
+
+    @Test fun malformedPersistedBranchDisablesOnlyThatSourceAndRemainsRepairable() {
+        val original = RepositorySources.list(app, key, defaults).single()
+        val custom = RepositorySources.source("Wallentx/DroidDeck", catalogBranch = "wallentx/powervr")
+        RepositorySources.save(app, key, defaults, listOf(original, custom))
+        RepositorySources.bind(
+            app, key, defaults, custom, 456, RepositorySources.generation(app, key, defaults),
+        )
+        val file = RepositorySources.policyFile(app, key)
+        val json = JSONObject(file.readText())
+        json.getJSONArray("sources").getJSONObject(1).put("catalogBranch", "bad branch")
+        file.writeText(json.toString())
+
+        val listed = RepositorySources.list(app, key, defaults)
+        assertEquals(listOf(original.id, custom.id), listed.map { it.id })
+        assertEquals("bad branch", listed[1].catalogBranch)
+        assertEquals(456L, listed[1].repositoryId)
+        assertEquals(listOf(original.id), RepositorySources.visible(app, key, defaults).map { it.id })
+
+        val repaired = RepositorySources.save(
+            app, key, defaults, listed.map { if (it.id == custom.id) it.copy(catalogBranch = null) else it },
+        )
+        assertEquals(2, RepositorySources.visible(app, key, defaults).size)
+        assertNull(repaired[1].catalogBranch)
+    }
+
+    @Test fun nonStringPersistedBranchFailsClosedWithoutRewritingThePolicy() {
+        val policyKey = "wcp/nonstring"
+        val original = RepositorySources.list(app, policyKey, defaults).single()
+        val custom = RepositorySources.source("Wallentx/DroidDeck")
+        RepositorySources.save(app, policyKey, defaults, listOf(original, custom))
+        val file = RepositorySources.policyFile(app, policyKey)
+        val json = JSONObject(file.readText())
+        json.getJSONArray("sources").getJSONObject(1).put("catalogBranch", 123)
+        file.writeText(json.toString())
+        val stored = file.readText()
+
+        val listed = RepositorySources.list(app, policyKey, defaults)
+        assertEquals(listOf(original.id, custom.id), listed.map { it.id })
+        assertNull(listed[1].catalogBranch)
+        assertEquals(listOf(original.id), RepositorySources.visible(app, policyKey, defaults).map { it.id })
+        assertEquals(stored, file.readText())
+
+        RepositorySources.bind(
+            app, policyKey, defaults, listed[0], 789, RepositorySources.generation(app, policyKey, defaults),
+        )
+        val afterBinding = RepositorySources.list(app, policyKey, defaults)
+        assertEquals(listOf(original.id, custom.id), afterBinding.map { it.id })
+        assertEquals(listOf(original.id), RepositorySources.visible(app, policyKey, defaults).map { it.id })
+        assertEquals(123, JSONObject(file.readText()).getJSONArray("sources").getJSONObject(1).getInt("catalogBranch"))
     }
 
     @Test fun builtInsCanBeHiddenButNotRemovedOrDuplicated() {

@@ -15,10 +15,18 @@ whose catalog is followed. Hiding that selected repository stops its checks;
 DroidDeck does not switch to another fork. The selected channel stays associated
 with the selected repository.
 
+Leave **Catalog branch** blank to follow the selected repository's default branch.
+Set a branch such as `dev` or `wallentx/powervr` to use that branch's catalog instead.
+Branch names are case-sensitive. Branch edits take effect only after **Save**.
+Each branch selection has its own cached catalog, and changing branches preserves
+the selected repository and update channel. A missing explicit branch does not
+fall back to another branch.
+
 GitHub rate limits produce a message asking you to try again after a few minutes.
 Cached releases stay available, and refresh requests wait for GitHub's retry or
 reset time before trying that host again. An Updates source must publish
-`catalog.json` on `main`; a missing repository or catalog gets a separate error.
+`catalog.json` on its default branch, or on the branch explicitly selected in
+Sources. A missing repository or catalog gets a separate error.
 
 ## Release identification
 
@@ -34,7 +42,7 @@ archive name, size, and SHA-256 must match that release's asset metadata.
 | FEX, DXVK, VKD3D | `droiddeck-component-<component>.json` | WCP files under the release tags below |
 | Proton | `droiddeck-component-proton.json` | Existing ARM64 GE, CachyOS, and DroidDeck Proton archive names |
 | Turnip | Existing driver archive names | Banners-Turnip, WinNative, and `DD-Turnip-vX.Y.Z.zip` formats |
-| App updates | `catalog.json` on the repository's `main` branch | Existing schema-1 update catalog |
+| App updates | `catalog.json` on the repository's default or selected branch | Existing schema-1 update catalog |
 
 WCP tag mappings:
 
@@ -86,6 +94,18 @@ belong to one of those repositories. Actual APK signatures, signer lineage,
 package identity, version, size, and digest are verified before installation;
 catalog signer text alone is not proof. Another signing key cannot silently
 replace an installed application.
+
+The catalog publisher follows the destination repository's default branch too:
+
+```sh
+python3 tools/release/update_catalog.py \
+  --source-repo owner/repository --ci-repo owner/repository
+```
+
+Pass `--branch dev` to publish to a particular branch, and select that same branch
+in the app's Sources editor. `--dry-run` prints the generated catalog without
+publishing it. The existing `main-<commit>` Preview release-tag convention is
+independent of the branch containing `catalog.json`.
 
 ## System Vulkan bundles
 

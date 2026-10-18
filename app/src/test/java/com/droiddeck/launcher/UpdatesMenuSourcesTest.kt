@@ -55,7 +55,7 @@ class UpdatesMenuSourcesTest {
     fun backgroundRateLimitShowsActionablePopupAndKeepsCachedCatalog() {
         val source = AppUpdates.sources(activity).single()
         activity.getSharedPreferences("app_updates", 0).edit().putString(
-            "catalog:${source.id}", """{"tests":[],"checkedAt":123}""",
+            AppUpdates.catalogCacheKey(source), """{"tests":[],"checkedAt":123}""",
         ).commit()
         menu.catalog = AppUpdates.cached(activity, source.id)
         respondWith(429)

@@ -64,6 +64,71 @@ class GitHubArtifactsTest {
         }
     }
 
+    private fun repositoryFileBody(value: String = "x") = JSONObject()
+        .put("type", "file")
+        .put("path", "catalog.json")
+        .put("encoding", "base64")
+        .put("size", value.toByteArray().size)
+        .put("content", android.util.Base64.encodeToString(value.toByteArray(), android.util.Base64.NO_WRAP))
+        .toString()
+
+    @Test fun repositoryFilesUseTheDefaultBranchUnlessAnOverrideIsConfigured() {
+        val requests = ArrayList<URI>()
+        GitHubArtifacts.openConnection = { url ->
+            requests.add(url.toURI())
+            Response(url, body = if (url.path.endsWith("/catalog.json")) repositoryFileBody()
+                else """{"id":123,"full_name":"Example/Drivers"}""")
+        }
+
+        assertEquals("x", GitHubArtifacts.readRepositoryFile(
+            app, key, defaults, source, "catalog.json", null,
+        ).toString(Charsets.UTF_8))
+        assertEquals(null, requests.single { it.path.endsWith("/catalog.json") }.rawQuery)
+
+        requests.clear()
+        val dev = RepositorySources.save(app, key, defaults, listOf(source.copy(catalogBranch = "dev"))).single()
+        GitHubArtifacts.readRepositoryFile(app, key, defaults, dev, "catalog.json", dev.catalogBranch)
+        assertEquals("ref=dev", requests.single { it.path.endsWith("/catalog.json") }.rawQuery)
+
+        requests.clear()
+        val punctuation = RepositorySources.save(
+            app, key, defaults, listOf(dev.copy(catalogBranch = "Feature/dev+100%")),
+        ).single()
+        GitHubArtifacts.readRepositoryFile(app, key, defaults, punctuation, "catalog.json", punctuation.catalogBranch)
+        assertEquals("ref=Feature%2Fdev%2B100%25", requests.single { it.path.endsWith("/catalog.json") }.rawQuery)
+    }
+
+    @Test fun branchChangeDuringRepositoryFileFetchRejectsTheStaleResult() {
+        val dev = RepositorySources.save(app, key, defaults, listOf(source.copy(catalogBranch = "dev"))).single()
+        GitHubArtifacts.openConnection = { url ->
+            if (url.path.endsWith("/catalog.json")) {
+                RepositorySources.save(app, key, defaults, listOf(dev.copy(catalogBranch = "release")))
+                Response(url, body = repositoryFileBody())
+            } else Response(url, body = """{"id":123,"full_name":"Example/Drivers"}""")
+        }
+
+        assertTrue(runCatching {
+            GitHubArtifacts.readRepositoryFile(app, key, defaults, dev, "catalog.json", dev.catalogBranch)
+        }.isFailure)
+    }
+
+    @Test fun missingExplicitBranchFileDoesNotFallBackToDefault() {
+        val requests = ArrayList<URI>()
+        val dev = RepositorySources.save(app, key, defaults, listOf(source.copy(catalogBranch = "dev"))).single()
+        GitHubArtifacts.openConnection = { url ->
+            requests.add(url.toURI())
+            if (url.path.endsWith("/catalog.json")) Response(url, status = 404)
+            else Response(url, body = """{"id":123,"full_name":"Example/Drivers"}""")
+        }
+
+        val error = runCatching {
+            GitHubArtifacts.readRepositoryFile(app, key, defaults, dev, "catalog.json", dev.catalogBranch)
+        }.exceptionOrNull()
+        assertTrue(error is GitHubArtifacts.HttpException && error.status == 404)
+        assertEquals(1, requests.count { it.path.endsWith("/catalog.json") })
+        assertEquals("ref=dev", requests.single { it.path.endsWith("/catalog.json") }.rawQuery)
+    }
+
     @Test fun refreshBindsIdentityAndRetainsLastGoodCatalogAfterFailure() {
         successfulTransport()
         val results = GitHubArtifacts.refreshReleases(app, key, defaults, source)

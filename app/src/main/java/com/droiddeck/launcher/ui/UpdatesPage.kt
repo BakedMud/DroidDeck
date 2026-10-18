@@ -116,6 +116,7 @@ internal fun UpdatesPage(s: FrontEndState, a: FrontEndActions, modifier: Modifie
                 builtIns = AppUpdates.sourceBuiltIns(),
                 enabled = u.stage == null,
                 title = stringResource(R.string.sources_updates_title),
+                showCatalogBranch = true,
                 onSaved = ua.onSourcesChanged,
             )
             ToolIcon(Icons.Outlined.Refresh, stringResource(R.string.store_check_updates), busy = u.checking, enabled = !u.checking && u.stage == null, onClick = ua.onCheck)

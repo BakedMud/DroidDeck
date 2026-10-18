@@ -59,6 +59,7 @@ private data class SourceDraft(
     val key: String,
     val repository: String,
     val hidden: Boolean,
+    val catalogBranch: String,
     val original: RepositorySources.Source? = null,
 ) {
     val builtIn: Boolean get() = original?.builtIn == true
@@ -70,6 +71,7 @@ internal fun RepositorySourcesButton(
     builtIns: List<String>,
     enabled: Boolean = true,
     title: String = stringResource(R.string.sources_component_title),
+    showCatalogBranch: Boolean = false,
     ioDispatcher: CoroutineDispatcher = Dispatchers.IO,
     onSaved: () -> Unit,
 ) {
@@ -88,6 +90,7 @@ internal fun RepositorySourcesButton(
     val loadError = stringResource(R.string.sources_load_error)
     val saveError = stringResource(R.string.sources_save_error)
     val invalidRepository = stringResource(R.string.sources_invalid_repository)
+    val invalidCatalogBranch = stringResource(R.string.sources_invalid_catalog_branch)
     DisposableEffect(scopeKey) {
         onDispose { if (menu != null && Steps.step === menu) Steps.drop() }
     }
@@ -99,7 +102,7 @@ internal fun RepositorySourcesButton(
         try {
             rows = withContext(ioDispatcher) {
                 RepositorySources.list(context, scopeKey, builtIns).map {
-                    SourceDraft(it.id, it.repository, it.hidden, it)
+                    SourceDraft(it.id, it.repository, it.hidden, it.catalogBranch.orEmpty(), it)
                 }
             }
             loaded = true
@@ -127,60 +130,83 @@ internal fun RepositorySourcesButton(
                     val editable = open && loaded && !loading && !saving
                     val remove = { rows = rows.filterNot { it.key == row.key } }
                     val toggle = { rows = rows.map { if (it.key == row.key) it.copy(hidden = !it.hidden) else it } }
-                    Row(
-                        Modifier.fillMaxWidth().padding(horizontal = 4.dp),
-                        verticalAlignment = Alignment.CenterVertically,
-                    ) {
-                        if (!row.builtIn) IconButton(
-                            onClick = remove,
-                            enabled = editable,
-                            modifier = Modifier.size(48.dp).controllerConfirm(enabled = editable, onClick = remove),
+                    Column(Modifier.fillMaxWidth()) {
+                        Row(
+                            Modifier.fillMaxWidth().padding(horizontal = 4.dp),
+                            verticalAlignment = Alignment.CenterVertically,
                         ) {
-                            Icon(Icons.Outlined.Delete, stringResource(R.string.sources_remove, row.repository), tint = palette.error)
+                            if (!row.builtIn) IconButton(
+                                onClick = remove,
+                                enabled = editable,
+                                modifier = Modifier.size(48.dp).controllerConfirm(enabled = editable, onClick = remove),
+                            ) {
+                                Icon(Icons.Outlined.Delete, stringResource(R.string.sources_remove, row.repository), tint = palette.error)
+                            }
+                            if (row.builtIn) {
+                                Text(
+                                    row.repository,
+                                    modifier = Modifier.weight(1f).border(1.dp, palette.line, Shape12)
+                                        .padding(horizontal = 10.dp, vertical = 12.dp),
+                                    color = if (row.hidden) colors.onSurfaceVariant else colors.onBackground,
+                                    fontSize = 14.sp,
+                                    textDecoration = if (row.hidden) TextDecoration.LineThrough else TextDecoration.None,
+                                )
+                            } else {
+                                OutlinedTextField(
+                                    value = row.repository,
+                                    onValueChange = { text ->
+                                        rows = rows.map { if (it.key == row.key) it.copy(repository = text) else it }
+                                        error = null
+                                    },
+                                    enabled = editable,
+                                    singleLine = true,
+                                    keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Uri),
+                                    label = { Text(stringResource(R.string.sources_repository)) },
+                                    textStyle = MaterialTheme.typography.bodyMedium.copy(
+                                        textDecoration = if (row.hidden) TextDecoration.LineThrough else TextDecoration.None,
+                                    ),
+                                    modifier = Modifier.weight(1f),
+                                )
+                            }
+                            IconButton(
+                                onClick = toggle,
+                                enabled = editable,
+                                modifier = Modifier.size(48.dp).then(if (index == 0) Modifier.focusRequester(first) else Modifier)
+                                    .controllerConfirm(enabled = editable, onClick = toggle),
+                            ) {
+                                Icon(
+                                    if (row.hidden) Icons.Outlined.VisibilityOff else Icons.Outlined.Visibility,
+                                    stringResource(if (row.hidden) R.string.sources_show else R.string.sources_hide, row.repository),
+                                    tint = if (row.hidden) colors.onSurfaceVariant else colors.onBackground,
+                                )
+                            }
                         }
-                        if (row.builtIn) {
-                            Text(
-                                row.repository,
-                                modifier = Modifier.weight(1f).border(1.dp, palette.line, Shape12)
-                                    .padding(horizontal = 10.dp, vertical = 12.dp),
-                                color = if (row.hidden) colors.onSurfaceVariant else colors.onBackground,
-                                fontSize = 14.sp,
-                                textDecoration = if (row.hidden) TextDecoration.LineThrough else TextDecoration.None,
-                            )
-                        } else {
+                        if (showCatalogBranch) Column(
+                            Modifier.fillMaxWidth().padding(horizontal = 56.dp, vertical = 2.dp),
+                        ) {
                             OutlinedTextField(
-                                value = row.repository,
+                                value = row.catalogBranch,
                                 onValueChange = { text ->
-                                    rows = rows.map { if (it.key == row.key) it.copy(repository = text) else it }
+                                    rows = rows.map { if (it.key == row.key) it.copy(catalogBranch = text) else it }
                                     error = null
                                 },
                                 enabled = editable,
                                 singleLine = true,
-                                keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Uri),
-                                label = { Text(stringResource(R.string.sources_repository)) },
-                                textStyle = MaterialTheme.typography.bodyMedium.copy(
-                                    textDecoration = if (row.hidden) TextDecoration.LineThrough else TextDecoration.None,
-                                ),
-                                modifier = Modifier.weight(1f),
+                                label = { Text(stringResource(R.string.sources_catalog_branch)) },
+                                modifier = Modifier.fillMaxWidth(),
                             )
-                        }
-                        IconButton(
-                            onClick = toggle,
-                            enabled = editable,
-                            modifier = Modifier.size(48.dp).then(if (index == 0) Modifier.focusRequester(first) else Modifier)
-                                .controllerConfirm(enabled = editable, onClick = toggle),
-                        ) {
-                            Icon(
-                                if (row.hidden) Icons.Outlined.VisibilityOff else Icons.Outlined.Visibility,
-                                stringResource(if (row.hidden) R.string.sources_show else R.string.sources_hide, row.repository),
-                                tint = if (row.hidden) colors.onSurfaceVariant else colors.onBackground,
+                            Text(
+                                stringResource(R.string.sources_catalog_branch_default),
+                                color = colors.onSurfaceVariant,
+                                fontSize = 12.sp,
+                                modifier = Modifier.padding(horizontal = 10.dp, vertical = 2.dp),
                             )
                         }
                     }
                 }
             }
             val canAdd = open && loaded && !loading && !saving && rows.size < 100
-            val add = { rows = rows + SourceDraft(UUID.randomUUID().toString(), "", false) }
+            val add = { rows = rows + SourceDraft(UUID.randomUUID().toString(), "", false, "") }
             TextButton(
                 onClick = add,
                 enabled = canAdd,
@@ -196,10 +222,16 @@ internal fun RepositorySourcesButton(
                     stringResource(if (saving) R.string.sources_saving else R.string.sources_save),
                     enabled = open && loaded && !loading && !saving,
                 ) {
+                    val branches = try {
+                        rows.map { RepositorySources.normalizeCatalogBranch(it.catalogBranch) }
+                    } catch (_: IllegalArgumentException) {
+                        error = invalidCatalogBranch
+                        return@PrimaryButton
+                    }
                     val sources = try {
-                        rows.map { row ->
-                            if (row.builtIn) row.original!!.copy(hidden = row.hidden)
-                            else RepositorySources.source(row.repository, row.hidden)
+                        rows.zip(branches).map { (row, branch) ->
+                            if (row.builtIn) row.original!!.copy(hidden = row.hidden, catalogBranch = branch)
+                            else RepositorySources.source(row.repository, row.hidden, branch)
                         }
                     } catch (_: IllegalArgumentException) {
                         error = invalidRepository

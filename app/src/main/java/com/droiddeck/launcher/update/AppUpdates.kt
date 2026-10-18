@@ -25,6 +25,7 @@ object AppUpdates {
     const val SOURCE_SCOPE = "updates/app"
     private const val PREFS = "app_updates"
     private const val KEY_CATALOG = "catalog"
+    private const val CATALOG_CACHE_VERSION = "v2"
     private const val KEY_CHANNEL = "channel"
     private const val KEY_SOURCE = "source"
     private const val KEY_SIGNER_STAMP = "signer_stamp"
@@ -330,25 +331,51 @@ object AppUpdates {
     }
 
     @JvmOverloads fun cached(context: Context, sourceId: String = follow(context, null).sourceId): Catalog? {
-        if (sourceId.isEmpty() || RepositorySources.visible(context, SOURCE_SCOPE, sourceBuiltIns()).none { it.id == sourceId }) return null
-        val preferences = prefs(context)
-        val scopedKey = "$KEY_CATALOG:$sourceId"
-        var raw = preferences.getString(scopedKey, null)
-        if (raw == null && sourceId == RepositorySources.source(CI_REPO).id) {
-            raw = preferences.getString(KEY_CATALOG, null)
-            if (raw != null) preferences.edit().putString(scopedKey, raw).remove(KEY_CATALOG).apply()
-        }
-        raw ?: return null
-        return runCatching { readCachedCatalog(JSONObject(raw), sourceId) }.getOrNull()
+        if (sourceId.isEmpty()) return null
+        val snapshot = synchronized(RepositorySources.lock) {
+            val source = RepositorySources.visible(context, SOURCE_SCOPE, sourceBuiltIns())
+                .singleOrNull { it.id == sourceId } ?: return@synchronized null
+            val generation = RepositorySources.generation(context, SOURCE_SCOPE, sourceBuiltIns())
+            val preferences = prefs(context)
+            val cacheKey = catalogCacheKey(source)
+            var raw = preferences.getString(cacheKey, null)
+            if (raw == null) {
+                val legacyScopedKey = "$KEY_CATALOG:$sourceId"
+                val legacyRaw = preferences.getString(legacyScopedKey, null)
+                    ?: if (sourceId == RepositorySources.source(CI_REPO).id) {
+                        preferences.getString(KEY_CATALOG, null)
+                    } else null
+                val editor = preferences.edit().remove(legacyScopedKey)
+                if (sourceId == RepositorySources.source(CI_REPO).id) editor.remove(KEY_CATALOG)
+                if (source.catalogBranch == "main" && legacyRaw != null) {
+                    editor.putString(cacheKey, legacyRaw)
+                    raw = legacyRaw
+                }
+                editor.commit()
+            }
+            val cachedRaw = raw ?: return@synchronized null
+            Triple(source, generation, cachedRaw)
+        } ?: return null
+        val catalog = runCatching { readCachedCatalog(JSONObject(snapshot.third), sourceId) }.getOrNull() ?: return null
+        return runCatching {
+            RepositorySources.whileCurrent(
+                context, SOURCE_SCOPE, sourceBuiltIns(), snapshot.first, snapshot.second,
+            ) { catalog }
+        }.getOrNull()
     }
 
     @JvmOverloads fun refresh(context: Context, sourceId: String = follow(context, null).sourceId): Catalog {
-        val source = RepositorySources.visible(context, SOURCE_SCOPE, sourceBuiltIns()).singleOrNull { it.id == sourceId }
-            ?: throw IOException("The selected update source is hidden or unavailable")
+        val (source, generation) = synchronized(RepositorySources.lock) {
+            val selected = RepositorySources.visible(context, SOURCE_SCOPE, sourceBuiltIns())
+                .singleOrNull { it.id == sourceId }
+                ?: throw IOException("The selected update source is hidden or unavailable")
+            selected to RepositorySources.generation(context, SOURCE_SCOPE, sourceBuiltIns())
+        }
         val checkedAt = System.currentTimeMillis()
         val published = try {
             JSONObject(GitHubArtifacts.readRepositoryFile(
-                context, SOURCE_SCOPE, sourceBuiltIns(), source, "catalog.json", "main", 1024 * 1024,
+                context, SOURCE_SCOPE, sourceBuiltIns(), source, "catalog.json", source.catalogBranch,
+                1024 * 1024, generation,
             ).toString(Charsets.UTF_8))
         } catch (error: GitHubArtifacts.HttpException) {
             if (error.status == 404) throw IOException(context.getString(R.string.sources_update_catalog_missing), error)
@@ -360,8 +387,30 @@ object AppUpdates {
         } catch (e: IOException) {
             throw IOException(context.getString(R.string.appupd_catalog_rejected, e.message), e)
         }
-        prefs(context).edit().putString("$KEY_CATALOG:${source.id}", writeCatalog(catalog).toString()).apply()
+        cacheCatalog(context, source, generation, catalog)
         return catalog
+    }
+
+    internal fun cacheCatalog(
+        context: Context, source: RepositorySources.Source, generation: Long, catalog: Catalog,
+    ) {
+        val cached = writeCatalog(catalog).toString()
+        RepositorySources.whileCurrent(context, SOURCE_SCOPE, sourceBuiltIns(), source, generation) {
+            val preferences = prefs(context)
+            val editor = preferences.edit().putString(catalogCacheKey(source), cached)
+                .remove("$KEY_CATALOG:${source.id}")
+            if (source.id == RepositorySources.source(CI_REPO).id) editor.remove(KEY_CATALOG)
+            if (!editor.commit()) throw IOException("Could not cache the update catalog")
+        }
+    }
+
+    internal fun catalogCacheKey(source: RepositorySources.Source): String {
+        val branch = RepositorySources.normalizeCatalogBranch(source.catalogBranch)
+        require(branch == source.catalogBranch) { "Repository source branch is not normalized" }
+        val selector = branch?.let {
+            "ref:${RepositorySources.sha256(it.toByteArray(Charsets.UTF_8))}"
+        } ?: "default"
+        return "$KEY_CATALOG:$CATALOG_CACHE_VERSION:${source.id}:$selector"
     }
 
     internal fun readPublishedCatalog(

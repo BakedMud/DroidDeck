@@ -55,6 +55,7 @@ class RepositorySourcesEditorTest {
         scope: String,
         dispatcher: CoroutineDispatcher = Dispatchers.Unconfined,
         visible: () -> Boolean = { true },
+        showCatalogBranch: Boolean = false,
         onSaved: () -> Unit = {},
     ) {
         Snapshot.sendApplyNotifications()
@@ -62,7 +63,10 @@ class RepositorySourcesEditorTest {
             DroidDeckTheme {
                 Box(Modifier.fillMaxSize()) {
                     if (visible()) Box(Modifier.align(Alignment.TopEnd).padding(16.dp)) {
-                        RepositorySourcesButton(scope, builtIns, ioDispatcher = dispatcher, onSaved = onSaved)
+                        RepositorySourcesButton(
+                            scope, builtIns, showCatalogBranch = showCatalogBranch,
+                            ioDispatcher = dispatcher, onSaved = onSaved,
+                        )
                     }
                     StepsLayer(Offset.Zero)
                 }
@@ -191,5 +195,45 @@ class RepositorySourcesEditorTest {
         compose.onNodeWithText(context.getString(R.string.sources_save)).performClick()
         compose.waitUntil(5_000) { saves == 2 }
         assertEquals(listOf(repository), RepositorySources.list(context, scope, builtIns).map { it.repository })
+    }
+
+    @Test fun catalogBranchIsDraftUntilSaveAndCanReturnToTheDefault() {
+        val scope = "editor/branch"
+        var saves = 0
+        show(scope, showCatalogBranch = true, onSaved = { saves++ })
+        open()
+        val branch = compose.onNodeWithText(context.getString(R.string.sources_catalog_branch))
+        branch.performTextReplacement("Wallentx/PowerVR")
+        compose.onNodeWithContentDescription(context.getString(R.string.sources_component_title)).performClick()
+        compose.waitForIdle()
+        assertNull(RepositorySources.list(context, scope, builtIns).single().catalogBranch)
+
+        open()
+        compose.onNodeWithText(context.getString(R.string.sources_catalog_branch)).performTextReplacement("Wallentx/PowerVR")
+        compose.onNodeWithText(context.getString(R.string.sources_save)).performClick()
+        compose.waitUntil(5_000) { saves == 1 }
+        assertEquals("Wallentx/PowerVR", RepositorySources.list(context, scope, builtIns).single().catalogBranch)
+
+        open()
+        compose.onNodeWithText(context.getString(R.string.sources_catalog_branch)).performTextReplacement("")
+        compose.onNodeWithText(context.getString(R.string.sources_save)).performClick()
+        compose.waitUntil(5_000) { saves == 2 }
+        assertNull(RepositorySources.list(context, scope, builtIns).single().catalogBranch)
+    }
+
+    @Test fun invalidCatalogBranchHasADistinctError() {
+        val branchScope = "editor/invalid-branch"
+        show(branchScope, showCatalogBranch = true)
+        open()
+        compose.onNodeWithText(context.getString(R.string.sources_catalog_branch)).performTextReplacement("bad..branch")
+        compose.onNodeWithText(context.getString(R.string.sources_save)).performClick()
+        compose.onNodeWithText(context.getString(R.string.sources_invalid_catalog_branch)).assertExists()
+        assertNull(RepositorySources.list(context, branchScope, builtIns).single().catalogBranch)
+    }
+
+    @Test fun componentEditorDoesNotShowCatalogBranches() {
+        show("editor/no-branch")
+        open()
+        compose.onNodeWithText(context.getString(R.string.sources_catalog_branch)).assertDoesNotExist()
     }
 }

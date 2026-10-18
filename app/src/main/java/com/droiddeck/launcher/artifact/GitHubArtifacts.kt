@@ -78,7 +78,7 @@ object GitHubArtifacts {
         val releases = ArrayList<Release>()
         val raw = JSONArray()
         for (page in 1..maxPages) {
-            requireCurrent(context, key, builtIns, source.id, generation)
+            requireCurrent(context, key, builtIns, source, generation)
             val url = "https://api.github.com/repositories/${bound.repositoryId}/releases?per_page=$PAGE_SIZE&page=$page"
             val array = JSONArray(fetch(url, MAX_JSON_BYTES) { sameApiIdentity(it, bound.repositoryId!!) }.toString(Charsets.UTF_8))
             if (array.length() > PAGE_SIZE) throw IOException("GitHub release page exceeds limit")
@@ -95,7 +95,7 @@ object GitHubArtifacts {
             .put("repositoryId", bound.repositoryId).put("releases", raw)
             .toString().toByteArray(Charsets.UTF_8)
         if (cache.size > MAX_CACHE_BYTES) throw IOException("Release catalog exceeds size limit")
-        RepositorySources.whileCurrent(context, key, builtIns, source.id, generation) {
+        RepositorySources.whileCurrent(context, key, builtIns, source, generation) {
             RepositorySources.atomicWrite(cacheFile(context, key, bound), cache)
         }
         return releases
@@ -122,15 +122,20 @@ object GitHubArtifacts {
 
     @JvmStatic @JvmOverloads fun readRepositoryFile(
         context: Context, key: String, builtIns: List<String>, source: RepositorySources.Source,
-        path: String, ref: String, maxBytes: Int = 1024 * 1024,
+        path: String, ref: String?, maxBytes: Int = 1024 * 1024,
+        expectedGeneration: Long = RepositorySources.generation(context, key, builtIns),
     ): ByteArray {
         require(maxBytes in 1..MAX_JSON_BYTES)
         validatePath(path)
-        require(ref.isNotEmpty() && ref.length <= 256 && ref.none { it.isISOControl() }) { "Invalid Git reference" }
-        val generation = RepositorySources.generation(context, key, builtIns)
+        val branch = RepositorySources.normalizeCatalogBranch(ref)
+        val generation = expectedGeneration
+        requireCurrent(context, key, builtIns, source, generation)
         val bound = resolve(context, key, builtIns, source, generation)
         val encodedPath = path.split('/').joinToString("/") { segment(it) }
-        val url = "https://api.github.com/repositories/${bound.repositoryId}/contents/$encodedPath?ref=${segment(ref)}"
+        val url = buildString {
+            append("https://api.github.com/repositories/${bound.repositoryId}/contents/$encodedPath")
+            branch?.let { append("?ref=${segment(it)}") }
+        }
         val json = JSONObject(fetch(url, minOf(MAX_CACHE_BYTES, maxBytes * 2 + 8192)) {
             sameApiIdentity(it, bound.repositoryId!!)
         }.toString(Charsets.UTF_8))
@@ -140,7 +145,7 @@ object GitHubArtifacts {
         require(size in 0..maxBytes.toLong()) { "Repository file exceeds size limit" }
         val data = Base64.decode(json.getString("content"), Base64.DEFAULT)
         require(data.size.toLong() == size) { "Repository file size does not match" }
-        requireCurrent(context, key, builtIns, source.id, generation)
+        requireCurrent(context, key, builtIns, source, generation)
         return data
     }
 
@@ -165,9 +170,9 @@ object GitHubArtifacts {
         tag: String, asset: Asset, maxBytes: Int = 1024 * 1024,
     ): ByteArray {
         val generation = RepositorySources.generation(context, key, builtIns)
-        requireCurrent(context, key, builtIns, source.id, generation)
+        requireCurrent(context, key, builtIns, source, generation)
         val data = readReleaseAsset(source, tag, asset, maxBytes)
-        requireCurrent(context, key, builtIns, source.id, generation)
+        requireCurrent(context, key, builtIns, source, generation)
         return data
     }
 
@@ -270,7 +275,7 @@ object GitHubArtifacts {
         context: Context, key: String, builtIns: List<String>, source: RepositorySources.Source,
         generation: Long,
     ): RepositorySources.Source {
-        requireCurrent(context, key, builtIns, source.id, generation)
+        requireCurrent(context, key, builtIns, source, generation)
         val repo = RepositorySources.canonicalRepository(source.repository)
         val url = "https://api.github.com/repos/$repo"
         val json = JSONObject(fetch(url, 128 * 1024) { sameApiRepository(it, repo) }.toString(Charsets.UTF_8))
@@ -280,8 +285,10 @@ object GitHubArtifacts {
         return RepositorySources.bind(context, key, builtIns, source, json.getLong("id"), generation)
     }
 
-    private fun requireCurrent(context: Context, key: String, builtIns: List<String>, sourceId: String, generation: Long) {
-        if (!RepositorySources.isCurrent(context, key, builtIns, sourceId, generation)) {
+    private fun requireCurrent(
+        context: Context, key: String, builtIns: List<String>, source: RepositorySources.Source, generation: Long,
+    ) {
+        if (!RepositorySources.isCurrent(context, key, builtIns, source, generation)) {
             throw IOException("Repository source changed while checking")
         }
     }

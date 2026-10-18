@@ -390,16 +390,67 @@ class AppUpdatesTest {
         AppUpdates.saveSources(context, AppUpdates.sources(context).map {
             if (it.id == official.id) it.copy(hidden = false) else it
         })
+        assertNull(AppUpdates.cached(context, official.id))
+        assertFalse(context.getSharedPreferences("app_updates", 0).contains("catalog"))
+
+        val main = AppUpdates.saveSources(context, AppUpdates.sources(context).map {
+            if (it.id == official.id) it.copy(catalogBranch = "main") else it
+        }).single { it.id == official.id }
+        context.getSharedPreferences("app_updates", 0).edit()
+            .putString("catalog:${official.id}", AppUpdates.writeCatalog(catalog).toString())
+            .commit()
         assertNotNull(AppUpdates.cached(context, official.id))
+        assertTrue(context.getSharedPreferences("app_updates", 0).contains(AppUpdates.catalogCacheKey(main)))
+        assertFalse(context.getSharedPreferences("app_updates", 0).contains("catalog:${official.id}"))
+    }
+
+    @Test
+    fun catalogCachesAreIsolatedByBranchAndReuseTheSameSelectionWhenReturning() {
+        val context = RuntimeEnvironment.getApplication()
+        val original = AppUpdates.sources(context).single()
+        val preferences = context.getSharedPreferences("app_updates", 0)
+        preferences.edit().putString(
+            AppUpdates.catalogCacheKey(original), AppUpdates.writeCatalog(catalog).toString(),
+        ).commit()
+        AppUpdates.setFollow(context, Follow(Channel.TEST, 93, original.id))
+
+        val dev = AppUpdates.saveSources(context, listOf(original.copy(catalogBranch = "dev"))).single()
+        assertNull(AppUpdates.cached(context, dev.id))
+        assertEquals(Follow(Channel.TEST, 93, original.id), AppUpdates.follow(context, null))
+        preferences.edit().putString(
+            AppUpdates.catalogCacheKey(dev), AppUpdates.writeCatalog(catalog).toString(),
+        ).commit()
+        assertNotNull(AppUpdates.cached(context, dev.id))
+
+        val restored = AppUpdates.saveSources(context, listOf(dev.copy(catalogBranch = null))).single()
+        assertNotNull(AppUpdates.cached(context, restored.id))
+        assertEquals(Follow(Channel.TEST, 93, original.id), AppUpdates.follow(context, null))
+    }
+
+    @Test
+    fun branchChangeAfterParsingRejectsTheStaleCatalogBeforeCacheCommit() {
+        val context = RuntimeEnvironment.getApplication()
+        val source = AppUpdates.sources(context).single()
+        val preferences = context.getSharedPreferences("app_updates", 0)
+        val previous = AppUpdates.writeCatalog(AppUpdates.Catalog(stable, null, emptyList(), 17L)).toString()
+        preferences.edit().putString(AppUpdates.catalogCacheKey(source), previous).commit()
+        val generation = RepositorySources.generation(context, AppUpdates.SOURCE_SCOPE, AppUpdates.sourceBuiltIns())
+        val dev = AppUpdates.saveSources(context, listOf(source.copy(catalogBranch = "dev"))).single()
+
+        assertTrue(runCatching { AppUpdates.cacheCatalog(context, source, generation, catalog) }.isFailure)
+        assertEquals(previous, preferences.getString(AppUpdates.catalogCacheKey(source), null))
+        assertFalse(preferences.contains(AppUpdates.catalogCacheKey(dev)))
     }
 
     @Test
     fun missingCatalogAndRateLimitReportDifferentErrorsAndPreserveCachedUpdate() {
         val context = RuntimeEnvironment.getApplication()
-        val source = AppUpdates.sources(context).single()
+        val source = AppUpdates.saveSources(
+            context, listOf(AppUpdates.sources(context).single().copy(catalogBranch = "dev")),
+        ).single()
         val cachedJson = AppUpdates.writeCatalog(catalog).toString()
         val prefs = context.getSharedPreferences("app_updates", 0)
-        prefs.edit().putString("catalog:${source.id}", cachedJson).commit()
+        prefs.edit().putString(AppUpdates.catalogCacheKey(source), cachedJson).commit()
         val production = GitHubArtifacts.openConnection
         try {
             for (status in listOf(404, 429)) {
@@ -413,9 +464,14 @@ class AppUpdatesTest {
                 val error = runCatching { AppUpdates.refresh(context, source.id) }.exceptionOrNull()!!
                 if (status == 404) assertEquals(context.getString(R.string.sources_update_catalog_missing), error.message)
                 else assertTrue(GitHubArtifacts.isRateLimited(error))
-                assertEquals(cachedJson, prefs.getString("catalog:${source.id}", null))
+                assertEquals(cachedJson, prefs.getString(AppUpdates.catalogCacheKey(source), null))
                 assertEquals(catalog.stable!!.tag, AppUpdates.cached(context, source.id)!!.stable!!.tag)
             }
+            GitHubArtifacts.clearRateLimits()
+            GitHubArtifacts.openConnection = { throw IOException("offline") }
+            assertTrue(runCatching { AppUpdates.refresh(context, source.id) }.exceptionOrNull() is IOException)
+            assertEquals(cachedJson, prefs.getString(AppUpdates.catalogCacheKey(source), null))
+            assertEquals(catalog.stable!!.tag, AppUpdates.cached(context, source.id)!!.stable!!.tag)
         } finally {
             GitHubArtifacts.openConnection = production
             GitHubArtifacts.clearRateLimits()

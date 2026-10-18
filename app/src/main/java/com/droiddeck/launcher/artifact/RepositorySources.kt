@@ -25,12 +25,15 @@ object RepositorySources {
         val builtIn: Boolean,
         val hidden: Boolean,
         val repositoryId: Long? = null,
+        val catalogBranch: String? = null,
     )
 
     private data class Policy(
         val generation: Long,
         val rows: List<Source>,
         val bindings: Map<String, Long>,
+        val invalidBranchSourceIds: Set<String> = emptySet(),
+        val rawInvalidCatalogBranches: Map<String, Any> = emptyMap(),
         val damaged: Boolean = false,
     )
 
@@ -64,9 +67,30 @@ object RepositorySources {
         return "$owner/$name".lowercase(Locale.ROOT)
     }
 
-    @JvmStatic @JvmOverloads fun source(repository: String, hidden: Boolean = false): Source {
+    @JvmStatic fun normalizeCatalogBranch(input: String?): String? {
+        val value = input?.trim()?.takeIf { it.isNotEmpty() } ?: return null
+        require(value.length <= 256) { "Invalid Git branch name" }
+        require(value != "HEAD" && !value.startsWith('-')) { "Invalid Git branch name" }
+        require(!value.startsWith('/') && !value.endsWith('/') && !value.contains("//")) {
+            "Invalid Git branch name"
+        }
+        require(!value.contains("..") && !value.contains("@{") && !value.endsWith('.')) {
+            "Invalid Git branch name"
+        }
+        require(value.none { character ->
+            character.isWhitespace() || character.isISOControl() || character in "~^:?*[\\"
+        }) { "Invalid Git branch name" }
+        require(value.split('/').none { it.startsWith('.') || it.endsWith(".lock") }) {
+            "Invalid Git branch name"
+        }
+        return value
+    }
+
+    @JvmStatic @JvmOverloads fun source(
+        repository: String, hidden: Boolean = false, catalogBranch: String? = null,
+    ): Source {
         val canonical = canonicalRepository(repository)
-        return Source(digest(canonical), canonical, false, hidden)
+        return Source(digest(canonical), canonical, false, hidden, catalogBranch = normalizeCatalogBranch(catalogBranch))
     }
 
     @JvmStatic fun list(context: Context, key: String, builtIns: List<String>): List<Source> =
@@ -81,7 +105,10 @@ object RepositorySources {
     }
 
     @JvmStatic fun visible(context: Context, key: String, builtIns: List<String>): List<Source> =
-        synchronized(lock) { read(context, key, builtIns).rows.filterNot { it.hidden } }
+        synchronized(lock) {
+            val policy = read(context, key, builtIns)
+            policy.rows.filterNot { it.hidden || it.id in policy.invalidBranchSourceIds }
+        }
 
     @JvmStatic fun generation(context: Context, key: String, builtIns: List<String>): Long =
         synchronized(lock) { read(context, key, builtIns).generation }
@@ -99,7 +126,10 @@ object RepositorySources {
             require(row.id == digest(canonical)) { "Repository source identity changed" }
             val bound = previous.bindings[canonical]
             require(row.repositoryId == null || row.repositoryId == bound) { "Repository identity cannot be changed" }
-            Source(row.id, canonical, defaults.any { it.repository == canonical }, row.hidden, bound)
+            Source(
+                row.id, canonical, defaults.any { it.repository == canonical }, row.hidden, bound,
+                normalizeCatalogBranch(row.catalogBranch),
+            )
         }
         require(defaults.all { original -> normalized.any { it.id == original.id } }) {
             "Built-in repositories can be hidden but cannot be removed"
@@ -114,7 +144,18 @@ object RepositorySources {
     ): Boolean = synchronized(lock) {
         val policy = read(context, key, builtIns)
         !policy.damaged && policy.generation == generation &&
-            policy.rows.any { it.id == sourceId && !it.hidden }
+            sourceId !in policy.invalidBranchSourceIds && policy.rows.any { it.id == sourceId && !it.hidden }
+    }
+
+    @JvmStatic fun isCurrent(
+        context: Context, key: String, builtIns: List<String>, source: Source, generation: Long,
+    ): Boolean = synchronized(lock) {
+        val policy = read(context, key, builtIns)
+        !policy.damaged && policy.generation == generation && source.id !in policy.invalidBranchSourceIds &&
+            policy.rows.any {
+                it.id == source.id && it.repository == source.repository &&
+                    it.catalogBranch == source.catalogBranch && !it.hidden
+            }
     }
 
     @JvmStatic fun bind(
@@ -123,7 +164,10 @@ object RepositorySources {
     ): Source = synchronized(lock) {
         require(repositoryId > 0) { "Invalid GitHub repository identity" }
         val policy = read(context, key, builtIns)
-        val row = policy.rows.firstOrNull { it.id == source.id && it.repository == source.repository && !it.hidden }
+        val row = policy.rows.firstOrNull {
+            it.id == source.id && it.repository == source.repository && it.catalogBranch == source.catalogBranch &&
+                !it.hidden && it.id !in policy.invalidBranchSourceIds
+        }
         if (policy.damaged || policy.generation != expectedGeneration || row == null) {
             throw IOException("Repository source changed while checking")
         }
@@ -170,6 +214,16 @@ object RepositorySources {
         action()
     }
 
+    internal fun <T> whileCurrent(
+        context: Context, key: String, builtIns: List<String>, source: Source,
+        generation: Long, action: () -> T,
+    ): T = synchronized(lock) {
+        if (!isCurrent(context, key, builtIns, source, generation)) {
+            throw IOException("Repository source changed while checking")
+        }
+        action()
+    }
+
     private fun defaults(builtIns: List<String>): List<Source> {
         require(builtIns.size <= MAX_SOURCES) { "Too many built-in sources" }
         val rows = builtIns.map { source(it).copy(builtIn = true) }
@@ -198,18 +252,36 @@ object RepositorySources {
             val saved = json.getJSONArray("sources")
             require(saved.length() <= MAX_SOURCES)
             val seen = HashSet<String>()
+            val invalidBranchSourceIds = HashSet<String>()
+            val rawInvalidCatalogBranches = LinkedHashMap<String, Any>()
             val rows = (0 until saved.length()).map { index ->
                 val item = saved.getJSONObject(index)
                 val repo = item.getString("repository")
                 require(canonicalRepository(repo) == repo && seen.add(repo))
                 val id = item.getString("id")
                 require(id == digest(repo))
-                Source(id, repo, initial.any { it.repository == repo }, item.getBoolean("hidden"), bindings[repo])
+                val savedBranchValue = item.opt("catalogBranch")
+                val invalidBranchType = item.has("catalogBranch") && savedBranchValue !== JSONObject.NULL &&
+                    savedBranchValue !is String
+                val savedBranch = savedBranchValue as? String
+                val branch = if (invalidBranchType) {
+                    invalidBranchSourceIds.add(id)
+                    rawInvalidCatalogBranches[id] = requireNotNull(savedBranchValue)
+                    null
+                } else try {
+                    normalizeCatalogBranch(savedBranch)
+                } catch (_: IllegalArgumentException) {
+                    invalidBranchSourceIds.add(id)
+                    savedBranch
+                }
+                Source(
+                    id, repo, initial.any { it.repository == repo }, item.getBoolean("hidden"), bindings[repo], branch,
+                )
             }.toMutableList()
             initial.filter { original -> rows.none { it.id == original.id } }.forEach {
                 rows.add(it.copy(hidden = true, repositoryId = bindings[it.repository]))
             }
-            Policy(generation, rows, bindings)
+            Policy(generation, rows, bindings, invalidBranchSourceIds, rawInvalidCatalogBranches)
         } catch (_: Exception) {
             Policy(Long.MIN_VALUE, initial.map { it.copy(hidden = true) }, emptyMap(), damaged = true)
         }
@@ -217,7 +289,13 @@ object RepositorySources {
 
     private fun write(context: Context, key: String, policy: Policy) {
         val rows = JSONArray()
-        policy.rows.forEach { row -> rows.put(JSONObject().put("id", row.id).put("repository", row.repository).put("hidden", row.hidden)) }
+        policy.rows.forEach { row ->
+            val item = JSONObject().put("id", row.id).put("repository", row.repository).put("hidden", row.hidden)
+            val rawInvalidBranch = policy.rawInvalidCatalogBranches[row.id]
+            if (rawInvalidBranch != null) item.put("catalogBranch", rawInvalidBranch)
+            else row.catalogBranch?.let { item.put("catalogBranch", it) }
+            rows.put(item)
+        }
         val bindings = JSONObject()
         policy.bindings.forEach { (repository, id) -> bindings.put(repository, id) }
         val json = JSONObject().put("schema", 1).put("scope", key).put("generation", policy.generation)
