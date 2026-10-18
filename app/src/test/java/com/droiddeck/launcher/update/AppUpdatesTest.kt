@@ -11,6 +11,7 @@ import com.droiddeck.launcher.update.AppUpdates.Offer
 import com.droiddeck.launcher.update.AppUpdates.PreviewChange
 import com.droiddeck.launcher.update.AppUpdates.PreviewHistoryKind
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertFalse
 import org.junit.Assert.assertNotNull
 import org.junit.Assert.assertNull
 import org.json.JSONArray
