@@ -449,7 +449,7 @@ object SystemVulkanComponentStore {
                 val seen = HashSet<String>()
                 while (true) {
                     val entry = tar.nextTarEntry ?: break
-                    val path = SystemVulkanManifest.path(entry.name)
+                    val path = SystemVulkanManifest.path(if (entry.isDirectory) entry.name.removeSuffix("/") else entry.name)
                     require(seen.add(path) && path != "component.json") { "Duplicate System Vulkan archive path: $path" }
                     if (entry.isDirectory) {
                         require(path in parents) { "Unexpected System Vulkan directory: $path" }
