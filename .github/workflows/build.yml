@@ -328,12 +328,14 @@ jobs:
           aarch64-linux-gnu-strip --strip-unneeded "$D/usr/local/bin/droiddeck-clipboard"
           VK_INCLUDE=$(ls -d "${ANDROID_NDK_LATEST_HOME:-${ANDROID_NDK_HOME:-$ANDROID_NDK_ROOT}}"/toolchains/llvm/prebuilt/*/sysroot/usr/include | head -1) \
             tools/vr/build.sh --native "$D/usr/local/lib/droiddeck-vr"
-          for script in tools/linuxfs/overlay/usr/local/bin/droiddeck-* tools/linuxfs/overlay/usr/local/bin/steam-compatibility; do
+          for script in tools/linuxfs/overlay/usr/local/bin/droiddeck-* tools/linuxfs/overlay/usr/local/bin/steam-compatibility tools/linuxfs/overlay/usr/local/bin/immortalis-env; do
             install -Dm644 "$script" "$D/usr/local/bin/$(basename "$script")"
           done
           for f in tools/linuxfs/overlay/usr/bin/* tools/linuxfs/overlay/usr/bin/steamos-polkit-helpers/*; do
             [ -f "$f" ] && install -Dm644 "$f" "$D/${f#tools/linuxfs/overlay/}"
           done
+          install -Dm644 "tools/linuxfs/overlay/usr/local/lib/immortalis/libdxvk_mali_compat_layer.so" "$D/usr/local/lib/immortalis/libdxvk_mali_compat_layer.so"
+          install -Dm644 "tools/linuxfs/overlay/usr/local/share/vulkan/explicit_layer.d/libdxvk_mali_compat_layer.json" "$D/usr/local/share/vulkan/explicit_layer.d/libdxvk_mali_compat_layer.json"
           if [ -f tools/gamescope/release.env ]; then
             . tools/gamescope/release.env
             gh release download "${GAMESCOPE_TAG}" -R "${GAMESCOPE_REPO:-${GITHUB_REPOSITORY}}" -p gamescope.tzst -O gamescope.tzst

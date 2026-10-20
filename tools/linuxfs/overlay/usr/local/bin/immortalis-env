@@ -1,0 +1,11 @@
+#!/bin/bash
+# Project Immortalis - Mali Vulkan compatibility
+
+export VK_LAYER_PATH="/usr/local/share/vulkan/explicit_layer.d${VK_LAYER_PATH:+:$VK_LAYER_PATH}"
+
+case ":${VK_INSTANCE_LAYERS:-}:" in
+  *:VK_LAYER_COMPAT_DxvkMaliCompatLayer:*) ;;
+  *) export VK_INSTANCE_LAYERS="${VK_INSTANCE_LAYERS:+${VK_INSTANCE_LAYERS}:}VK_LAYER_COMPAT_DxvkMaliCompatLayer" ;;
+esac
+
+export ENABLE_DXVK_MALI_COMPAT_LAYER=1

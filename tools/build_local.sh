@@ -153,7 +153,7 @@ if restore_step x86-preloads "${x86_key}" "${linuxfs_dir}"; then :; else
             set -euo pipefail
             printf "deb http://archive.debian.org/debian bullseye main\ndeb http://archive.debian.org/debian-security bullseye-security main\n" > /etc/apt/sources.list
             apt-get -o Acquire::Check-Valid-Until=false update -qq
-            DEBIAN_FRONTEND=noninteractive apt-get install -y -qq --no-install-recommends gcc g++ gcc-multilib g++-multilib binutils >/dev/null
+            DEBIAN_FRONTEND=noninteractive apt-get install -y -qq --no-install-recommends gcc g++ gcc-multilib g++-multilib binutils gawk >/dev/null
             tools/linuxfs/build-x86-preloads.sh app/src/main/assets/linuxfs
             chown -R '"$(id -u):$(id -g)"' app/src/main/assets/linuxfs
         '

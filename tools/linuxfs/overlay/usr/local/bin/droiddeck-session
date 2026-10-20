@@ -217,7 +217,7 @@ if [ -z "${BL_INSIDE:-}" ]; then
       echo "== gamescope: games at ${nested}x${height} stretched to the ${width}x${height} output"
     fi
   fi
-  backend=${BL_GAMESCOPE_BACKEND:-wayland}
+  backend=${BL_GAMESCOPE_BACKEND:-sdl}
   case "$backend" in
     wayland) ;;
     sdl) export SDL_VIDEODRIVER=wayland ;;
@@ -248,6 +248,10 @@ if [ -z "${BL_INSIDE:-}" ]; then
     export MANGOHUD_CONFIGFILE STEAM_USE_MANGOAPP=1 STEAM_MANGOAPP_PRESETS_SUPPORTED=1 STEAM_MANGOAPP_HORIZONTAL_SUPPORTED=1
     args+=(--mangoapp)
     echo "== gamescope: mangoapp on ($(command -v mangoapp), config $MANGOHUD_CONFIGFILE)"
+  fi
+  # Immortalis: Gamescope parent
+  if [ "$mode" = steam ]; then
+      source /usr/local/bin/immortalis-env
   fi
   export BL_INSIDE=1
   if [ "$mode" = steam ]; then
@@ -768,6 +772,10 @@ BUSCONF
         bl_steam_presentation=(-cef-disable-gpu-compositing)
         echo "== steam: system Vulkan WSI layer unavailable; using software CEF compositing"
       fi
+    fi
+    # Immortalis: Steam child
+    if [ "$mode" = steam ]; then
+        source /usr/local/bin/immortalis-env
     fi
     # Decky
     decky_loader=$HOME/homebrew/services/PluginLoader
